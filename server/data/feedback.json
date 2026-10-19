@@ -1,0 +1,11 @@
+[
+  {
+    "id": "fb-1792414085399",
+    "timestamp": "2026-10-19T12:48:05.399Z",
+    "messageId": "test-msg-1",
+    "prompt": "what is your favorite sport",
+    "response": "I like cricket",
+    "rating": "thumbs_up",
+    "comment": "Great answer"
+  }
+]

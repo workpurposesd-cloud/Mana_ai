@@ -1,0 +1,18 @@
+[
+  {
+    "id": "mem-1792413938804-tgi2",
+    "category": "personal",
+    "key": "User's Name",
+    "value": "bored",
+    "createdAt": "2026-10-19T12:45:38.804Z",
+    "updatedAt": "2026-10-19T19:30:31.563Z"
+  },
+  {
+    "id": "mem-default-1",
+    "category": "preference",
+    "key": "Communication Style",
+    "value": "Warm, casual, like a trusted friend. Direct answers first, natural emojis.",
+    "createdAt": "2026-10-19T12:38:39.926Z",
+    "updatedAt": "2026-10-19T18:25:52.262Z"
+  }
+]

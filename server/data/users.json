@@ -1,0 +1,16 @@
+[
+  {
+    "id": "user-default-1",
+    "name": "U Nagesh",
+    "email": "nagesh@mana.ai",
+    "passwordHash": "f23c1068670fb678e65c644b9ed67d6b2f133743d6d9165c071e089f34ae4007",
+    "createdAt": "2026-10-19T12:52:01.725Z"
+  },
+  {
+    "id": "usr-1792415663553-vh5d",
+    "name": "dasu",
+    "email": "ummaladasu@gmail.com",
+    "passwordHash": "dcf3c099df05a4ea288c735bd5fa30ef6eb1c56b5a92c8e3c1ac875057a83b4e",
+    "createdAt": "2026-10-19T13:14:23.553Z"
+  }
+]
