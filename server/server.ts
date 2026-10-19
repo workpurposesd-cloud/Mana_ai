@@ -662,9 +662,14 @@ app.get('/api/video/restrictions', (_req, res) => {
   res.json({ success: true, restrictions: PROVIDER_RESTRICTIONS })
 })
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`✨ Mana AI Server running on http://localhost:${PORT}`)
-  console.log(`🤖 Active AI Provider: ${configService.getConfig().aiProvider}`)
-  console.log(`🔎 Active Search Provider: ${configService.getConfig().searchProvider}`)
-})
+// Start server if run directly (not as a serverless function)
+if (!process.env.NETLIFY && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  app.listen(PORT, () => {
+    console.log(`✨ Mana AI Server running on http://localhost:${PORT}`)
+    console.log(`🤖 Active AI Provider: ${configService.getConfig().aiProvider}`)
+    console.log(`🔎 Active Search Provider: ${configService.getConfig().searchProvider}`)
+  })
+}
+
+export { app }
+export default app

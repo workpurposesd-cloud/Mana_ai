@@ -1,7 +1,7 @@
 {
   "aiProvider": "builtin",
   "searchProvider": "duckduckgo",
-  "searchMode": "auto",
+  "searchMode": "always",
   "geminiApiKey": "",
   "openaiApiKey": "",
   "groqApiKey": "",
