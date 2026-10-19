@@ -19,15 +19,17 @@ import { SearchEvidence } from './types.js'
 const app = express()
 const PORT = process.env.PORT || 3001
 
-const MEDIA_DIR = path.resolve(process.cwd(), 'server', 'data', 'media')
+const MEDIA_DIR = process.env.MEDIA_DIR || (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME ? path.join('/tmp', 'media') : path.resolve(process.cwd(), 'server', 'data', 'media'))
 if (!fs.existsSync(MEDIA_DIR)) {
-  fs.mkdirSync(MEDIA_DIR, { recursive: true })
+  try {
+    fs.mkdirSync(MEDIA_DIR, { recursive: true })
+  } catch {}
 }
 
 // Middleware
 app.use(
   cors({
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'],
+    origin: true,
     credentials: true,
   })
 )

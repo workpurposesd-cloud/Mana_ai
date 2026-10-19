@@ -39,3 +39,4 @@ ddg_test.html
 # Local Netlify folder
 .netlify
 deno.lock
+netlify/functions/manifest.json

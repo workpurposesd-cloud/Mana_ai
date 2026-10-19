@@ -3,9 +3,19 @@ import path from 'path'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-const DATA_DIR = path.resolve(__dirname, '../data')
+function resolveDataDir(): string {
+  if (process.env.DATA_DIR) return process.env.DATA_DIR
+  if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) return '/tmp'
+  try {
+    if (typeof __dirname !== 'undefined') return path.resolve(__dirname, '../data')
+    if (typeof import.meta !== 'undefined' && import.meta.url) {
+      return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data')
+    }
+  } catch {}
+  return path.resolve(process.cwd(), 'server', 'data')
+}
+
+const DATA_DIR = resolveDataDir()
 const USERS_FILE = path.join(DATA_DIR, 'users.json')
 
 export interface User {
