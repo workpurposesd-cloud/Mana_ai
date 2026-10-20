@@ -168,6 +168,27 @@ class ChatHistoryService {
     }
     return session
   }
+
+  /**
+   * Seamlessly claims / migrates guest conversations created on this device to the authenticated user ID
+   */
+  public async claimGuestSessions(guestId: string, userId: string): Promise<number> {
+    if (!guestId || !userId || guestId === userId) return 0
+    await this.refreshFromDb()
+    let count = 0
+    const normalizedGuest = guestId.startsWith('guest:') ? guestId : `guest:${guestId}`
+    for (const session of this.sessions) {
+      if (session.userId === normalizedGuest || session.userId === guestId) {
+        session.userId = userId
+        session.updatedAt = new Date().toISOString()
+        count++
+      }
+    }
+    if (count > 0) {
+      await this.persistSessionsAsync()
+    }
+    return count
+  }
 }
 
 export const chatHistoryService = new ChatHistoryService()

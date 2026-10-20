@@ -333,6 +333,8 @@ export const App: React.FC = () => {
   const handleLogout = () => {
     localStorage.removeItem('mana_auth_token')
     localStorage.removeItem('mana_user')
+    localStorage.removeItem('mana_cached_sessions')
+    localStorage.removeItem('mana_active_session_id')
     setAuthToken(null)
     setCurrentUser(null)
     setCurrentSessionId(null)
@@ -357,6 +359,7 @@ export const App: React.FC = () => {
     setIsListening(false)
 
     try {
+      localStorage.setItem('mana_active_session_id', sessionId)
       const res = await safeApiFetch<{ session: { messages: Message[] } }>(`/api/chats/${sessionId}`, {
         headers: getAuthHeaders(),
       })
@@ -372,6 +375,16 @@ export const App: React.FC = () => {
       console.error('Failed to load session:', err)
     }
   }
+
+  // Auto-restore active session from localStorage on load
+  useEffect(() => {
+    const savedActiveId = localStorage.getItem('mana_active_session_id')
+    if (savedActiveId && !currentSessionId && sessions.length > 0) {
+      if (sessions.some((s) => s.id === savedActiveId)) {
+        handleSelectSession(savedActiveId)
+      }
+    }
+  }, [sessions])
 
   // Delete a chat session
   const handleDeleteSession = async (sessionId: string) => {
@@ -390,6 +403,7 @@ export const App: React.FC = () => {
       })
 
       if (currentSessionId === sessionId) {
+        localStorage.removeItem('mana_active_session_id')
         setCurrentSessionId(null)
         currentSessionIdRef.current = null
         setMessages([])
@@ -411,6 +425,7 @@ export const App: React.FC = () => {
     setMessages([])
     setCurrentSessionId(null)
     currentSessionIdRef.current = null
+    localStorage.removeItem('mana_active_session_id')
     setIsGenerating(false)
   }
 

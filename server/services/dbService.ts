@@ -1,8 +1,10 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { getStore } from '@netlify/blobs'
+import { createClient } from '@supabase/supabase-js'
 
-// Storage Keys
+// Storage Collections
 export type StorageCollection = 'users' | 'chats' | 'memories' | 'documents' | 'config' | 'video_jobs'
 
 function resolveDataDir(): string {
@@ -21,15 +23,11 @@ const DATA_DIR = resolveDataDir()
 
 class DatabaseService {
   private memoryCache: Map<string, any> = new Map()
-  private isNetlifyBlobsAvailable: boolean = false
-  private netlifyStore: any = null
   private supabaseClient: any = null
-  private isSupabaseAvailable: boolean = false
-  private initialized: boolean = false
+  private supabaseChecked: boolean = false
 
   constructor() {
     this.ensureDataDir()
-    this.initProviders()
   }
 
   private ensureDataDir() {
@@ -40,67 +38,69 @@ class DatabaseService {
     } catch {}
   }
 
-  private async initProviders() {
-    if (this.initialized) return
-    this.initialized = true
+  public getSupabaseClient() {
+    if (this.supabaseChecked) return this.supabaseClient
+    this.supabaseChecked = true
 
-    // 1. Check Supabase availability
     const supabaseUrl = process.env.SUPABASE_URL
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY
+    const supabaseKey =
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.SUPABASE_KEY ||
+      process.env.SUPABASE_ANON_KEY
+
     if (supabaseUrl && supabaseKey) {
       try {
-        const { createClient } = await import('@supabase/supabase-js')
         this.supabaseClient = createClient(supabaseUrl, supabaseKey, {
           auth: { persistSession: false },
         })
-        this.isSupabaseAvailable = true
         console.log('[DBService] Supabase client initialized successfully.')
       } catch (err: any) {
-        console.warn('[DBService] Could not initialize Supabase:', err.message)
+        console.warn('[DBService] Supabase init error:', err.message)
       }
     }
-
-    // 2. Check Netlify Blobs availability
-    if (process.env.NETLIFY || process.env.NETLIFY_BLOBS_CONTEXT || process.env.SITE_ID) {
-      try {
-        const { getStore } = await import('@netlify/blobs')
-        this.netlifyStore = getStore('mana-persistent-data')
-        this.isNetlifyBlobsAvailable = true
-        console.log('[DBService] Netlify Blobs store initialized for production persistence.')
-      } catch (err: any) {
-        console.warn('[DBService] Netlify Blobs not available:', err.message)
-      }
-    }
+    return this.supabaseClient
   }
 
   /**
-   * Retrieves data from the highest-priority available storage provider.
+   * Dynamically gets Netlify Blobs store using current runtime context
    */
-  public async get<T>(collection: StorageCollection, defaultValue: T): Promise<T> {
-    await this.initProviders()
+  public getBlobsStore() {
+    try {
+      return getStore('mana-persistent-data')
+    } catch {
+      const siteID = process.env.NETLIFY_SITE_ID || process.env.SITE_ID
+      const token = process.env.NETLIFY_ACCESS_TOKEN || process.env.NETLIFY_AUTH_TOKEN
+      if (siteID && token) {
+        try {
+          return getStore({
+            name: 'mana-persistent-data',
+            siteID,
+            token,
+          })
+        } catch {}
+      }
+      return null
+    }
+  }
 
-    // 1. Check in-memory cache first for instant sub-millisecond response
+  public async get<T>(collection: StorageCollection, defaultValue: T): Promise<T> {
     if (this.memoryCache.has(collection)) {
       return this.memoryCache.get(collection) as T
     }
-
     return this.fetchFromProviders<T>(collection, defaultValue)
   }
 
-  /**
-   * Forces a fresh fetch from remote providers/disk, bypassing the in-memory cache.
-   */
   public async getFresh<T>(collection: StorageCollection, defaultValue: T): Promise<T> {
-    await this.initProviders()
     this.memoryCache.delete(collection)
     return this.fetchFromProviders<T>(collection, defaultValue)
   }
 
   private async fetchFromProviders<T>(collection: StorageCollection, defaultValue: T): Promise<T> {
-    // 2. Try Supabase
-    if (this.isSupabaseAvailable && this.supabaseClient) {
+    // 1. Try Supabase
+    const supabase = this.getSupabaseClient()
+    if (supabase) {
       try {
-        const { data, error } = await this.supabaseClient
+        const { data, error } = await supabase
           .from('mana_storage')
           .select('value')
           .eq('collection', collection)
@@ -110,25 +110,24 @@ class DatabaseService {
           this.memoryCache.set(collection, data.value)
           return data.value as T
         }
-      } catch (err: any) {
-        // Fall back to next provider
-      }
+      } catch {}
     }
 
-    // 3. Try Netlify Blobs
-    if (this.isNetlifyBlobsAvailable && this.netlifyStore) {
+    // 2. Try Netlify Blobs
+    const blobsStore = this.getBlobsStore()
+    if (blobsStore) {
       try {
-        const val = await this.netlifyStore.get(collection, { type: 'json' })
+        const val = await blobsStore.get(collection, { type: 'json' })
         if (val !== null && val !== undefined) {
           this.memoryCache.set(collection, val)
           return val as T
         }
       } catch (err: any) {
-        // Fall back to next provider
+        console.warn(`[DBService] Netlify Blobs read error for ${collection}:`, err.message)
       }
     }
 
-    // 4. Try local file system
+    // 3. Try Local File Storage
     try {
       const filePath = path.join(DATA_DIR, `${collection}.json`)
       if (fs.existsSync(filePath)) {
@@ -138,36 +137,28 @@ class DatabaseService {
         return parsed as T
       }
     } catch (err: any) {
-      console.warn(`[DBService] Error reading local file for ${collection}:`, err.message)
+      console.warn(`[DBService] Local disk read error for ${collection}:`, err.message)
     }
 
-    // Default value if nothing found
     this.memoryCache.set(collection, defaultValue)
     return defaultValue
   }
 
-  /**
-   * Saves data synchronously in-memory and asynchronously persists to cloud storage & disk.
-   */
   public async set<T>(collection: StorageCollection, value: T): Promise<void> {
-    await this.initProviders()
-
-    // 1. Immediately update memory cache
     this.memoryCache.set(collection, value)
 
-    // 2. Persist to local disk
+    // 1. Persist to local disk
     try {
       this.ensureDataDir()
       const filePath = path.join(DATA_DIR, `${collection}.json`)
       fs.writeFileSync(filePath, JSON.stringify(value, null, 2), 'utf-8')
-    } catch (err: any) {
-      // In read-only serverless this might fail if not in /tmp
-    }
+    } catch {}
 
-    // 3. Persist to Supabase if available
-    if (this.isSupabaseAvailable && this.supabaseClient) {
+    // 2. Persist to Supabase if available
+    const supabase = this.getSupabaseClient()
+    if (supabase) {
       try {
-        await this.supabaseClient.from('mana_storage').upsert({
+        await supabase.from('mana_storage').upsert({
           collection,
           value,
           updated_at: new Date().toISOString(),
@@ -177,24 +168,21 @@ class DatabaseService {
       }
     }
 
-    // 4. Persist to Netlify Blobs if available
-    if (this.isNetlifyBlobsAvailable && this.netlifyStore) {
+    // 3. Persist to Netlify Blobs if available
+    const blobsStore = this.getBlobsStore()
+    if (blobsStore) {
       try {
-        await this.netlifyStore.setJSON(collection, value)
+        await blobsStore.setJSON(collection, value)
       } catch (err: any) {
         console.warn(`[DBService] Netlify Blobs setJSON error for ${collection}:`, err.message)
       }
     }
   }
 
-  /**
-   * Synchronous get from memory cache or local disk.
-   */
   public getSync<T>(collection: StorageCollection, defaultValue: T): T {
     if (this.memoryCache.has(collection)) {
       return this.memoryCache.get(collection) as T
     }
-
     try {
       const filePath = path.join(DATA_DIR, `${collection}.json`)
       if (fs.existsSync(filePath)) {
@@ -209,22 +197,16 @@ class DatabaseService {
     return defaultValue
   }
 
-  /**
-   * Synchronous set in memory and local disk, with background cloud sync.
-   */
   public setSync<T>(collection: StorageCollection, value: T): void {
     this.memoryCache.set(collection, value)
-
     try {
       this.ensureDataDir()
       const filePath = path.join(DATA_DIR, `${collection}.json`)
       fs.writeFileSync(filePath, JSON.stringify(value, null, 2), 'utf-8')
     } catch {}
 
-    // Async cloud backup
-    if (this.isNetlifyBlobsAvailable || this.isSupabaseAvailable) {
-      this.set(collection, value).catch(() => {})
-    }
+    // Async background cloud sync
+    this.set(collection, value).catch(() => {})
   }
 }
 

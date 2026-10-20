@@ -10,6 +10,7 @@ import { generateAIResponse } from './services/aiService.js'
 import { memoryService } from './services/memoryService.js'
 import { authService } from './services/authService.js'
 import { chatHistoryService } from './services/chatHistoryService.js'
+import { dbService } from './services/dbService.js'
 import { generateAIImage } from './services/imageService.js'
 import { startVideoJob, getVideoJob, syncAndGetVideoJob, PROVIDER_RESTRICTIONS } from './services/videoService.js'
 import { documentService } from './services/documentService.js'
@@ -62,12 +63,13 @@ app.use('/api/media', express.static(MEDIA_DIR, {
   }
 }))
 
-// Rate limiting: 60 requests per minute
+// Rate limiting: 120 requests per minute (exempting health checks)
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 60,
+  max: 120,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.path === '/api/health' || req.path === '/health',
   message: { error: 'Too many requests. Please wait a moment before sending another query.' },
 })
 app.use('/api/', apiLimiter)
@@ -104,6 +106,13 @@ app.post('/api/auth/signup', async (req, res) => {
       return
     }
     const result = await authService.signup(name, email, password)
+
+    // Auto-claim any guest conversations created on this device
+    const guestHeader = (req.headers['x-guest-id'] as string) || (req.body.guestId as string)
+    if (guestHeader && result.user?.id) {
+      await chatHistoryService.claimGuestSessions(guestHeader, result.user.id)
+    }
+
     res.json({ success: true, ...result })
   } catch (err: any) {
     res.status(400).json({ error: err.message })
@@ -118,6 +127,13 @@ app.post('/api/auth/login', async (req, res) => {
       return
     }
     const result = await authService.login(email, password)
+
+    // Auto-claim any guest conversations created on this device
+    const guestHeader = (req.headers['x-guest-id'] as string) || (req.body.guestId as string)
+    if (guestHeader && result.user?.id) {
+      await chatHistoryService.claimGuestSessions(guestHeader, result.user.id)
+    }
+
     res.json({ success: true, ...result })
   } catch (err: any) {
     res.status(400).json({ error: err.message })
@@ -205,14 +221,19 @@ app.put('/api/chats/:id/title', async (req, res) => {
 })
 
 /**
- * Health check endpoint
+ * Health check endpoint with storage diagnostic info
  */
 app.get('/api/health', (_req, res) => {
+  const blobsStore = dbService.getBlobsStore()
   res.json({
     status: 'ok',
     app: 'Mana AI Backend',
     serverTime: new Date().toISOString(),
     uptimeSeconds: Math.floor(process.uptime()),
+    storage: {
+      blobsActive: !!blobsStore,
+      supabaseActive: !!process.env.SUPABASE_URL,
+    },
   })
 })
 
