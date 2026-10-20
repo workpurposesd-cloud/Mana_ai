@@ -80,14 +80,16 @@ export class ConfigService {
       console.warn('[ConfigService] Could not load saved config from disk:', e)
     }
 
-    const envProvider = (process.env.AI_PROVIDER || process.env.DEFAULT_AI_PROVIDER || 'gemini') as any
-    const envModel = process.env.GEMINI_MODEL || process.env.MODEL_NAME || 'gemini-1.5-flash'
-    const defaultAiProvider = (process.env.GEMINI_API_KEY ? 'gemini' : envProvider) || 'gemini'
+    const envProvider = (process.env.AI_PROVIDER || process.env.DEFAULT_AI_PROVIDER || 'ollama') as any
+    const envModel = process.env.OLLAMA_MODEL || process.env.MODEL_NAME || 'qwen2.5:3b'
+    const defaultAiProvider = envProvider || 'ollama'
 
     this.config = {
       aiProvider: defaultAiProvider,
       searchProvider: (process.env.DEFAULT_SEARCH_PROVIDER as any) || 'duckduckgo',
       searchMode: 'auto',
+      ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434',
+      ollamaModel: process.env.OLLAMA_MODEL || 'qwen2.5:3b',
       geminiApiKey: process.env.GEMINI_API_KEY || '',
       openaiApiKey: process.env.OPENAI_API_KEY || '',
       groqApiKey: process.env.GROQ_API_KEY || '',
@@ -110,6 +112,18 @@ export class ConfigService {
         pitch: 1.0,
       },
       ...savedConfig,
+    }
+
+    if (process.env.AI_PROVIDER) {
+      this.config.aiProvider = process.env.AI_PROVIDER as any
+    }
+    if (this.config.aiProvider === 'ollama') {
+      if (!this.config.ollamaModel || this.config.ollamaModel.startsWith('gemini')) {
+        this.config.ollamaModel = process.env.OLLAMA_MODEL || 'qwen2.5:3b'
+      }
+      if (!this.config.modelName || this.config.modelName.startsWith('gemini')) {
+        this.config.modelName = this.config.ollamaModel
+      }
     }
   }
 

@@ -18,7 +18,7 @@ interface ChatMessageProps {
   onOpenSettings?: () => void
 }
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({
+const ChatMessageComponent: React.FC<ChatMessageProps> = ({
   message,
   onFeedback,
   isSpeakingMessage,
@@ -78,6 +78,15 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
           <div className="chatgpt-search-pill running">
             <span className="spinner-dot" />
             <span>Searching the web...</span>
+          </div>
+        )}
+
+        {/* Subtle Typing Indicator while generating and waiting for first token */}
+        {!isUser && message.isStreaming && !message.content && !message.isSearching && (
+          <div className="mana-typing-indicator" aria-label="Thinking...">
+            <span className="typing-dot" />
+            <span className="typing-dot" />
+            <span className="typing-dot" />
           </div>
         )}
 
@@ -295,11 +304,36 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   )
 }
 
+export const ChatMessage = React.memo<ChatMessageProps>(
+  ChatMessageComponent,
+  (prevProps, nextProps) => {
+    return (
+      prevProps.message.id === nextProps.message.id &&
+      prevProps.message.content === nextProps.message.content &&
+      prevProps.message.isStreaming === nextProps.message.isStreaming &&
+      prevProps.message.isSearching === nextProps.message.isSearching &&
+      prevProps.message.searchStatus === nextProps.message.searchStatus &&
+      prevProps.message.feedback === nextProps.message.feedback &&
+      prevProps.isSpeakingMessage === nextProps.isSpeakingMessage &&
+      prevProps.message.searchEvidence === nextProps.message.searchEvidence &&
+      prevProps.message.video === nextProps.message.video &&
+      prevProps.message.image === nextProps.message.image &&
+      prevProps.message.isGeneratingMedia === nextProps.message.isGeneratingMedia &&
+      prevProps.message.mediaError === nextProps.message.mediaError
+    )
+  }
+)
+
 /**
  * Lightweight markdown parser for headings, code blocks, lists, links, and bold text
  */
 const FormattedMarkdown: React.FC<{ content: string }> = ({ content }) => {
   if (!content) return null
+
+  // Fast-path: single text block when no fenced code blocks exist
+  if (!content.includes('```')) {
+    return <TextMarkdownBlock text={content} />
+  }
 
   const parts: React.ReactNode[] = []
   const codeBlockRegex = /```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g
@@ -352,6 +386,11 @@ const CodeBlock: React.FC<{ language: string; code: string }> = ({ language, cod
 }
 
 const TextMarkdownBlock: React.FC<{ text: string }> = ({ text }) => {
+  // Fast path for plain single-line text without markdown syntax
+  if (!text.includes('\n') && !text.includes('*') && !text.includes('`') && !text.includes('[') && !text.includes('#')) {
+    return <p style={{ margin: '0.35rem 0' }}>{text}</p>
+  }
+
   const paragraphs = text.split(/\n\n+/)
 
   return (

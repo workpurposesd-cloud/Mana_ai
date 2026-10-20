@@ -10,7 +10,7 @@
     "id": "usr-1792415663553-vh5d",
     "name": "dasu",
     "email": "ummaladasu@gmail.com",
-    "passwordHash": "dcf3c099df05a4ea288c735bd5fa30ef6eb1c56b5a92c8e3c1ac875057a83b4e",
+    "passwordHash": "scrypt:d9dad3a2f9f6b6434be8665471960722:213fe46bef9d8045b7cf78bbdbec053db3e08c6cc8c183830c45803a2af1d7e3da0f6c8ee2d58e56aa6f5d71df6b662808583b02ca4bc60b851df39ba534cb0c",
     "createdAt": "2026-10-19T13:14:23.553Z"
   }
 ]

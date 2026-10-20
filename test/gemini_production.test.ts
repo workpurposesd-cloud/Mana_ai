@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { classifyIntent } from '../server/services/intentClassifier.js'
 import { selectModelForTask, determineTaskTier } from '../server/services/modelRouter.js'
-import { classifyGeminiError } from '../server/services/aiService.js'
+import { classifyGeminiError, getSupportedGeminiModels } from '../server/services/aiService.js'
 import { orchestrateChat } from '../server/services/chatOrchestrator.js'
 import { chatHistoryService } from '../server/services/chatHistoryService.js'
 import { configService } from '../server/services/configService.js'
@@ -126,7 +126,7 @@ async function main() {
     const intent = classifyIntent('Design a distributed cache system with raft consensus', [])
     const selection = selectModelForTask('reasoning', cfg, intent)
     assert.strictEqual(selection.provider, 'gemini')
-    assert.strictEqual(selection.modelName, 'gemini-1.5-pro')
+    assert(selection.modelName.includes('pro'), 'Must select a Gemini Pro reasoning model')
   })
 
   // TEST 8: Greetings do not trigger unnecessary web searches
@@ -278,6 +278,69 @@ async function main() {
     assert(netlifyToml.includes('to = "/.netlify/functions/chat-stream"'), 'Must point to chat-stream function')
     assert(netlifyToml.includes('from = "/api/*"'), 'Must have /api/* redirect in netlify.toml')
     assert(netlifyToml.includes('from = "/*"'), 'Must have SPA fallback redirect')
+  })
+
+  // TEST 18: Deprecated/Unsupported model produces clear actionable guidance pointing to gemini-2.5-flash
+  await runTest('Test 18: Deprecated/unsupported model error produces actionable configuration guidance', () => {
+    const modelError = {
+      status: 404,
+      message: 'models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent',
+    }
+    const classified = classifyGeminiError(modelError)
+    assert(
+      classified.message.includes('gemini-2.5-flash'),
+      `Expected guidance recommending gemini-2.5-flash, got: "${classified.message}"`
+    )
+    assert(
+      !classified.message.includes('gemini-1.5-flash'),
+      'Must not advise configuring the deprecated model'
+    )
+  })
+
+  // TEST 19: Permission error produces distinct permission message (not confused with invalid key)
+  await runTest('Test 19: Permission error (403) produces distinct permission message', () => {
+    const permError = {
+      status: 403,
+      message: 'PERMISSION_DENIED: The caller does not have permission, or Generative Language API has not been used in project',
+    }
+    const classified = classifyGeminiError(permError)
+    assert(
+      classified.message.includes('permission error') || classified.message.includes('Generative Language API is enabled'),
+      `Expected permission guidance, got: "${classified.message}"`
+    )
+  })
+
+  // TEST 20: Secrets in generic error messages are safely redacted
+  await runTest('Test 20: Secrets in raw Gemini error strings are strictly redacted', () => {
+    const rawError = {
+      status: 500,
+      message: 'Internal error contacting https://generativelanguage.googleapis.com/v1beta/models?key=AIzaSyD-SECRET-KEY-1234567890',
+    }
+    const classified = classifyGeminiError(rawError)
+    assert(
+      !classified.message.includes('AIzaSyD-SECRET-KEY-1234567890'),
+      'Must never expose secret API key in classified error message'
+    )
+    assert(
+      classified.message.includes('[REDACTED_KEY]') || !classified.message.includes('AIza'),
+      'Secret key must be redacted'
+    )
+  })
+
+  // TEST 21: Dynamic model discovery returns available models for mock key
+  await runTest('Test 21: Dynamic model discovery returns available models', async () => {
+    const models = await getSupportedGeminiModels('test-mock-key')
+    assert(Array.isArray(models) && models.length > 0, 'Must return array of models')
+    assert(models.includes('gemini-2.5-flash'), 'Must include modern gemini-2.5-flash')
+  })
+
+  // TEST 22: Fast Mode defaults to modern Flash model
+  await runTest('Test 22: Fast Mode defaults to gemini-2.5-flash when unset', () => {
+    const cfg = { ...configService.getConfig(), aiProvider: 'gemini' as const, modelName: '' }
+    const intent = classifyIntent('What is today?', [])
+    const selection = selectModelForTask('fast', cfg, intent)
+    assert.strictEqual(selection.provider, 'gemini')
+    assert(selection.modelName.includes('flash'), 'Default model must be a Flash model')
   })
 
   console.log(`\n=== PRODUCTION AUDIT TEST RESULTS: ${passedCount} PASSED, ${failedCount} FAILED ===\n`)

@@ -143,10 +143,14 @@ export interface VoiceSettings {
   voiceURI?: string
 }
 
+export type AIProvider = 'ollama' | 'builtin' | 'gemini' | 'openai' | 'groq'
+
 export interface AppConfig {
-  aiProvider: 'gemini' | 'openai' | 'groq' | 'builtin'
+  aiProvider: 'ollama' | 'builtin' | 'gemini' | 'openai' | 'groq'
   searchProvider: 'duckduckgo' | 'tavily' | 'serper' | 'brave'
   searchMode: SearchMode
+  ollamaBaseUrl?: string
+  ollamaModel?: string
   geminiApiKey?: string
   openaiApiKey?: string
   groqApiKey?: string

@@ -128,6 +128,52 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [showOpenaiKey, setShowOpenaiKey] = useState(false)
   const [showGroqKey, setShowGroqKey] = useState(false)
 
+  // Local AI (Ollama) status state
+  const [ollamaStatus, setOllamaStatus] = useState<{
+    checking: boolean
+    connected: boolean
+    models: string[]
+    error?: string
+  }>({
+    checking: false,
+    connected: false,
+    models: [],
+  })
+
+  const checkOllama = useCallback(async () => {
+    setOllamaStatus((prev) => ({ ...prev, checking: true }))
+    try {
+      const res = await safeApiFetch<{
+        connected: boolean
+        models: string[]
+        activeModel: string
+        error?: string
+      }>('/api/ollama/status')
+      if (res.success && res.data) {
+        setOllamaStatus({
+          checking: false,
+          connected: Boolean(res.data.connected),
+          models: res.data.models || [],
+          error: res.data.error,
+        })
+      } else {
+        setOllamaStatus({
+          checking: false,
+          connected: false,
+          models: [],
+          error: res.error || 'Ollama not reachable',
+        })
+      }
+    } catch {
+      setOllamaStatus({
+        checking: false,
+        connected: false,
+        models: [],
+        error: 'Ollama not running',
+      })
+    }
+  }, [])
+
   // Test search & test voice states
   const [testQuery, setTestQuery] = useState('latest cricket score')
   const [testResult, setTestResult] = useState<string | null>(null)
@@ -168,8 +214,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       voiceManager.getVoices().then((voices) => {
         setAvailableVoices(voices)
       })
+
+      checkOllama()
     }
-  }, [isOpen, config])
+  }, [isOpen, config, checkOllama])
 
   // Instant save helper for toggles / dropdowns / themes
   const handleInstantSave = useCallback(
@@ -884,12 +932,193 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }}
                 id="select-ai-provider"
               >
-                <option value="gemini">Google Gemini (Recommended — Ultra-fast, Intelligent)</option>
+                <option value="ollama">Local AI (Ollama) — Completely Free, 100% Private (Default)</option>
+                <option value="gemini">Google Gemini (Cloud — Fast, Intelligent)</option>
                 <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
                 <option value="groq">Groq (Llama 3.1 Instant)</option>
                 <option value="builtin">Built-in Smart Engine (Zero Key Required)</option>
               </select>
             </div>
+
+            {/* Local Ollama Configuration */}
+            {formData.aiProvider === 'ollama' && (
+              <div className="settings-card">
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: '0.5rem',
+                  }}
+                >
+                  <span className="settings-card-title">
+                    <Cpu size={16} /> Local Ollama Engine
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={checkOllama}
+                    disabled={ollamaStatus.checking}
+                    style={{
+                      fontSize: '0.75rem',
+                      padding: '0.25rem 0.6rem',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                    }}
+                  >
+                    <RefreshCw
+                      size={12}
+                      style={{
+                        animation: ollamaStatus.checking ? 'spin 1s linear infinite' : 'none',
+                      }}
+                    />
+                    {ollamaStatus.checking ? 'Checking...' : 'Check Status'}
+                  </button>
+                </div>
+
+                {/* Connection Status Badge */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.6rem 0.75rem',
+                    borderRadius: '8px',
+                    backgroundColor: ollamaStatus.connected ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                    border: `1px solid ${ollamaStatus.connected ? 'rgba(34, 197, 94, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`,
+                    marginBottom: '0.85rem',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      backgroundColor: ollamaStatus.connected ? '#22c55e' : '#ef4444',
+                      display: 'inline-block',
+                      boxShadow: ollamaStatus.connected ? '0 0 6px #22c55e' : 'none',
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: '0.82rem',
+                      fontWeight: 600,
+                      color: ollamaStatus.connected ? '#15803d' : '#b91c1c',
+                    }}
+                  >
+                    {ollamaStatus.checking
+                      ? 'Checking Ollama service...'
+                      : ollamaStatus.connected
+                      ? 'Ollama is online and ready (Local)'
+                      : 'Ollama is not running locally'}
+                  </span>
+                </div>
+
+                {!ollamaStatus.connected && !ollamaStatus.checking && (
+                  <div
+                    style={{
+                      fontSize: '0.8rem',
+                      color: 'var(--text-muted)',
+                      backgroundColor: 'var(--bg-subtle, #f9fafb)',
+                      padding: '0.75rem',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color, #e5e7eb)',
+                      marginBottom: '0.85rem',
+                      lineHeight: '1.45',
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-main)' }}>
+                      Quick Windows PowerShell Setup:
+                    </div>
+                    <div>1. Install: <code>winget install Ollama.Ollama</code></div>
+                    <div>2. Run Model: <code>ollama run qwen2.5:3b</code></div>
+                    <div style={{ marginTop: '0.35rem' }}>Then click <strong>Check Status</strong> above.</div>
+                  </div>
+                )}
+
+                {/* Model Selector / Name */}
+                <label
+                  style={{
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    color: 'var(--text-main)',
+                    display: 'block',
+                    marginBottom: '0.25rem',
+                  }}
+                >
+                  Local Model Name
+                </label>
+                {ollamaStatus.connected && ollamaStatus.models.length > 0 ? (
+                  <select
+                    className="form-select"
+                    style={{ marginBottom: '0.75rem' }}
+                    value={formData.ollamaModel || formData.modelName || 'qwen2.5:3b'}
+                    onChange={(e) => {
+                      const model = e.target.value
+                      setFormData((prev) => ({
+                        ...prev,
+                        ollamaModel: model,
+                        modelName: model,
+                      }))
+                      handleInstantSave({
+                        ollamaModel: model,
+                        modelName: model,
+                      })
+                    }}
+                  >
+                    {ollamaStatus.models.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                    {!ollamaStatus.models.includes(formData.ollamaModel || 'qwen2.5:3b') && (
+                      <option value={formData.ollamaModel || 'qwen2.5:3b'}>
+                        {formData.ollamaModel || 'qwen2.5:3b'} (Custom)
+                      </option>
+                    )}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    className="form-input"
+                    style={{ marginBottom: '0.75rem' }}
+                    placeholder="qwen2.5:3b"
+                    value={formData.ollamaModel || formData.modelName || ''}
+                    onChange={(e) => {
+                      handleTextChange('ollamaModel', e.target.value)
+                      handleTextChange('modelName', e.target.value)
+                    }}
+                  />
+                )}
+
+                {/* Base URL */}
+                <label
+                  style={{
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    color: 'var(--text-main)',
+                    display: 'block',
+                    marginBottom: '0.25rem',
+                  }}
+                >
+                  Ollama Base URL
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="http://127.0.0.1:11434"
+                  value={formData.ollamaBaseUrl || ''}
+                  onChange={(e) => handleTextChange('ollamaBaseUrl', e.target.value)}
+                />
+                <span
+                  className="settings-card-desc"
+                  style={{ marginTop: '0.35rem', marginBottom: 0, fontSize: '0.75rem' }}
+                >
+                  Default is <code>http://127.0.0.1:11434</code>. Free, 100% private, no API keys needed.
+                </span>
+              </div>
+            )}
 
             {/* Gemini API Key */}
             {formData.aiProvider === 'gemini' && (
@@ -1020,12 +1249,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             )}
 
-            {/* Model Identifier */}
-            {formData.aiProvider !== 'builtin' && (
+            {/* Model Identifier (Cloud / Custom providers) */}
+            {formData.aiProvider !== 'builtin' && formData.aiProvider !== 'ollama' && (
               <div className="settings-card">
                 <span className="settings-card-title">Model Identifier</span>
                 <span className="settings-card-desc">
-                  Specify the model variant (e.g. <code>gemini-2.5-flash</code> or <code>gemini-1.5-flash</code>).
+                  Specify the model variant (e.g. <code>gemini-2.5-flash</code>).
                 </span>
                 <input
                   type="text"
@@ -1034,7 +1263,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   onChange={(e) => handleTextChange('modelName', e.target.value)}
                   placeholder={
                     formData.aiProvider === 'gemini'
-                      ? 'gemini-1.5-flash'
+                      ? 'gemini-2.5-flash'
                       : formData.aiProvider === 'openai'
                       ? 'gpt-4o-mini'
                       : 'llama-3.1-8b-instant'

@@ -12,8 +12,10 @@ export interface ChatRequestOptions {
   history?: Array<{ role: 'user' | 'assistant'; content: string }>
   searchMode?: SearchMode
   reasoningMode?: 'fast' | 'thinking'
-  aiProvider?: 'gemini' | 'openai' | 'groq' | 'builtin'
+  aiProvider?: 'ollama' | 'gemini' | 'openai' | 'groq' | 'builtin'
   modelName?: string
+  ollamaBaseUrl?: string
+  ollamaModel?: string
   geminiApiKey?: string
   openaiApiKey?: string
   groqApiKey?: string
@@ -74,6 +76,12 @@ export async function orchestrateChat(
   }
   if (options.modelName) {
     config.modelName = options.modelName
+  }
+  if (options.ollamaBaseUrl) {
+    config.ollamaBaseUrl = options.ollamaBaseUrl
+  }
+  if (options.ollamaModel) {
+    config.ollamaModel = options.ollamaModel
   }
 
   // Validate that an incoming client key is non-empty, genuine, and not a masked placeholder
@@ -241,6 +249,8 @@ export async function orchestrateChat(
     memoriesUsed: relevantMemories.map((m) => m.key),
     documentsUsed: documentMatches.map((d) => d.docTitle),
     reasoningMode,
+    provider: config.aiProvider || 'ollama',
+    model: config.modelName || config.ollamaModel || 'qwen2.5:3b',
     timings: {
       reqStart,
       ttftMs: firstTokenTime || totalTime,

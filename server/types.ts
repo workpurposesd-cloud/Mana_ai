@@ -1,4 +1,4 @@
-export type AIProvider = 'gemini' | 'openai' | 'groq' | 'builtin'
+export type AIProvider = 'ollama' | 'builtin' | 'gemini' | 'openai' | 'groq'
 export type SearchProvider = 'duckduckgo' | 'tavily' | 'serper' | 'brave'
 export type SearchMode = 'auto' | 'always' | 'never'
 export type EmojiDensity = 'concise' | 'moderate' | 'minimal'
@@ -60,6 +60,8 @@ export interface AppConfig {
   aiProvider: AIProvider
   searchProvider: SearchProvider
   searchMode: SearchMode
+  ollamaBaseUrl?: string
+  ollamaModel?: string
   geminiApiKey?: string
   openaiApiKey?: string
   groqApiKey?: string

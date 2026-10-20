@@ -9,7 +9,7 @@
     "server": "tsx watch server/server.ts",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "tsx test/regression.test.ts && tsx test/conversation_simulation.test.ts && tsx test/gemini_production.test.ts && tsx test/repeat_response_fix.test.ts",
+    "test": "tsx test/regression.test.ts && tsx test/conversation_simulation.test.ts && tsx test/gemini_production.test.ts && tsx test/repeat_response_fix.test.ts && tsx test/ollama_integration.test.ts",
     "start": "tsx server/server.ts"
   },
   "dependencies": {

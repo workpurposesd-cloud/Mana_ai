@@ -66,10 +66,10 @@ export const App: React.FC = () => {
   const currentSessionIdRef = useRef<string | null>(null)
 
   const [config, setConfig] = useState<AppConfig>({
-    aiProvider: 'gemini',
+    aiProvider: 'ollama',
     searchProvider: 'duckduckgo',
     searchMode: 'auto',
-    modelName: 'gemini-1.5-flash',
+    modelName: 'qwen2.5:3b',
     systemPrompt: '',
     maxShortSentences: 4,
     emojiDensity: 'concise',
@@ -212,9 +212,14 @@ export const App: React.FC = () => {
     }
   }, [])
 
-  // Auto-scroll to bottom of messages
+  // Auto-scroll to bottom of messages (auto behavior during streaming prevents animation thrashing)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (!messages.length) return
+    const isStreaming = messages[messages.length - 1]?.isStreaming
+    messagesEndRef.current?.scrollIntoView({
+      behavior: isStreaming ? 'auto' : 'smooth',
+      block: 'end',
+    })
   }, [messages])
 
   const handleUpdateConfig = async (partial: Partial<AppConfig>) => {
@@ -817,8 +822,10 @@ export const App: React.FC = () => {
           history,
           searchMode: config.searchMode,
           reasoningMode: config.reasoningMode,
-          aiProvider: config.aiProvider || 'gemini',
-          modelName: config.modelName || 'gemini-1.5-flash',
+          aiProvider: config.aiProvider || 'ollama',
+          modelName: config.modelName || config.ollamaModel || 'qwen2.5:3b',
+          ollamaBaseUrl: config.ollamaBaseUrl,
+          ollamaModel: config.ollamaModel,
           // Never send shared server keys from the browser; only pass client BYOK key if explicitly configured
           ...(config.geminiApiKey && config.geminiApiKey.trim().length > 10 && !config.geminiApiKey.includes('••') && !config.geminiApiKey.includes('**')
             ? { geminiApiKey: config.geminiApiKey.trim() }
@@ -850,6 +857,55 @@ export const App: React.FC = () => {
       let finalContent = ''
       let finalEvidence = undefined
 
+      // Ultra-fast batched state updater for 60fps streaming rendering
+      const currentAssistantState: Partial<Message> = {
+        content: '',
+        isStreaming: true,
+        isSearching: false,
+      }
+
+      let rafId: number | null = null
+      let isUpdateScheduled = false
+
+      const flushAssistantState = (isFinal = false) => {
+        if (rafId) {
+          cancelAnimationFrame(rafId)
+          rafId = null
+        }
+        isUpdateScheduled = false
+
+        setMessages((prev) => {
+          const targetIdx = prev.findIndex((m) => m.id === assistantId)
+          if (targetIdx === -1) return prev
+          const target = prev[targetIdx]
+
+          if (
+            !isFinal &&
+            target.content === currentAssistantState.content &&
+            target.isStreaming === currentAssistantState.isStreaming &&
+            target.isSearching === currentAssistantState.isSearching &&
+            target.searchStatus === currentAssistantState.searchStatus
+          ) {
+            return prev
+          }
+
+          const copy = [...prev]
+          copy[targetIdx] = {
+            ...target,
+            ...currentAssistantState,
+          }
+          return copy
+        })
+      }
+
+      const scheduleBatchUpdate = () => {
+        if (isUpdateScheduled) return
+        isUpdateScheduled = true
+        rafId = requestAnimationFrame(() => {
+          flushAssistantState(false)
+        })
+      }
+
       while (true) {
         const { value, done } = await reader.read()
         if (done) break
@@ -857,6 +913,8 @@ export const App: React.FC = () => {
         buffer += decoder.decode(value, { stream: true })
         const events = buffer.split('\n\n')
         buffer = events.pop() || ''
+
+        let hasNewTokens = false
 
         for (const eventBlock of events) {
           if (!eventBlock.trim()) continue
@@ -878,69 +936,71 @@ export const App: React.FC = () => {
           try {
             const parsed = JSON.parse(eventData)
 
-            setMessages((prev) => {
-              const copy = [...prev]
-              const targetIdx = copy.findIndex((m) => m.id === assistantId)
-              if (targetIdx === -1) return prev
+            switch (eventType) {
+              case 'search_start':
+                currentAssistantState.isSearching = true
+                currentAssistantState.isSearchPerformed = true
+                currentAssistantState.intent = parsed
+                flushAssistantState(false)
+                break
 
-              const target = { ...copy[targetIdx] }
+              case 'search_status':
+                currentAssistantState.searchStatus = parsed.status
+                flushAssistantState(false)
+                break
 
-              switch (eventType) {
-                case 'search_start':
-                  target.isSearching = true
-                  target.isSearchPerformed = true
-                  target.intent = parsed
-                  break
+              case 'search_results':
+                currentAssistantState.searchEvidence = parsed
+                finalEvidence = parsed
+                currentAssistantState.isSearching = false
+                flushAssistantState(false)
+                break
 
-                case 'search_status':
-                  target.searchStatus = parsed.status
-                  break
+              case 'token':
+                currentAssistantState.content = (currentAssistantState.content || '') + parsed.token
+                finalContent = currentAssistantState.content
+                hasNewTokens = true
+                break
 
-                case 'search_results':
-                  target.searchEvidence = parsed
-                  finalEvidence = parsed
-                  target.isSearching = false
-                  break
+              case 'done':
+                currentAssistantState.isStreaming = false
+                currentAssistantState.isSearching = false
+                currentAssistantState.reasoningMode = parsed.reasoningMode
+                if (parsed.timings) {
+                  currentAssistantState.timings = parsed.timings
+                }
+                if (parsed.documentsUsed) {
+                  currentAssistantState.documentsUsed = parsed.documentsUsed
+                }
+                if (parsed.searchEvidence) {
+                  currentAssistantState.searchEvidence = parsed.searchEvidence
+                  finalEvidence = parsed.searchEvidence
+                }
+                flushAssistantState(true)
+                break
 
-                case 'token':
-                  target.content = (target.content || '') + parsed.token
-                  finalContent = target.content
-                  break
-
-                case 'done':
-                  target.isStreaming = false
-                  target.isSearching = false
-                  target.reasoningMode = parsed.reasoningMode
-                  if (parsed.timings) {
-                    target.timings = parsed.timings
-                  }
-                  if (parsed.documentsUsed) {
-                    target.documentsUsed = parsed.documentsUsed
-                  }
-                  if (parsed.searchEvidence) {
-                    target.searchEvidence = parsed.searchEvidence
-                    finalEvidence = parsed.searchEvidence
-                  }
-                  break
-
-                case 'error':
-                  target.isStreaming = false
-                  target.isSearching = false
-                  target.content =
-                    (target.content ? target.content + '\n\n' : '') +
-                    `⚠️ **Error**: ${parsed.message}`
-                  finalContent = target.content
-                  break
-              }
-
-              copy[targetIdx] = target
-              return copy
-            })
+              case 'error':
+                currentAssistantState.isStreaming = false
+                currentAssistantState.isSearching = false
+                currentAssistantState.content =
+                  (currentAssistantState.content ? currentAssistantState.content + '\n\n' : '') +
+                  `⚠️ **Error**: ${parsed.message}`
+                finalContent = currentAssistantState.content
+                flushAssistantState(true)
+                break
+            }
           } catch (jsonErr) {
             console.error('Error parsing SSE JSON:', jsonErr)
           }
         }
+
+        if (hasNewTokens) {
+          scheduleBatchUpdate()
+        }
       }
+
+      // Final flush guaranteeing all state is committed immediately
+      flushAssistantState(true)
 
       // Persist finished conversation to backend session
       const completedAssistantMsg: Message = {

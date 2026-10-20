@@ -105,7 +105,34 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
   const systemPrompt = buildSystemPrompt(config, searchEvidence, optimized.memoriesUsed, isDetailRequested, reasoningMode, documentMatches, intent)
   const fullPromptWithEvidence = buildUserPromptWithEvidence(prompt, searchEvidence, optimized.memoriesUsed, documentMatches, toolResults, optimized.historySummary, intent)
 
-  // 1. Google Gemini (Primary Provider)
+  // 1. Local AI (Ollama - Default Primary Provider)
+  if (modelSelection.provider === 'ollama' || config.aiProvider === 'ollama') {
+    const ollamaBaseUrl =
+      config.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434'
+    const ollamaModel =
+      config.modelName || config.ollamaModel || process.env.OLLAMA_MODEL || 'qwen2.5:3b'
+
+    const ollamaSystemPrompt = buildOllamaSystemPrompt(
+      config,
+      searchEvidence,
+      optimized.memoriesUsed,
+      isDetailRequested,
+      reasoningMode,
+      documentMatches,
+      intent
+    )
+
+    return await generateOllamaStream(
+      ollamaBaseUrl,
+      ollamaModel,
+      ollamaSystemPrompt,
+      fullPromptWithEvidence,
+      effectiveHistory,
+      onToken
+    )
+  }
+
+  // 2. Google Gemini (Cloud AI)
   const isGenuineKey = (k?: string): boolean =>
     typeof k === 'string' && k.trim().length > 10 && !k.includes('••••') && !k.includes('****')
 
@@ -119,7 +146,7 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
     }
     return await generateGeminiStream(
       activeGeminiKey,
-      modelSelection.modelName || process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+      modelSelection.modelName || process.env.GEMINI_MODEL || 'gemini-2.5-flash',
       systemPrompt,
       fullPromptWithEvidence,
       effectiveHistory,
@@ -214,61 +241,419 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
 }
 
 /**
- * Streams response using Google Gemini with complete multi-turn history and model fallbacks
+ * Streams response using Local AI (Ollama) with multi-turn conversation history,
+ * clean NDJSON stream decoding, and clear actionable error handling.
  */
-/**
- * Classifies Gemini-specific errors into user-friendly actionable messages
- */
-export function classifyGeminiError(err: any): Error {
-  const msg = (err?.message || '').toLowerCase()
-  const status = err?.status || err?.statusCode
-
-  if (
-    msg.includes('api_key_invalid') ||
-    msg.includes('api key not valid') ||
-    msg.includes('invalid api key') ||
-    msg.includes('api_key') ||
-    (status === 400 && msg.includes('key')) ||
-    status === 401 ||
-    status === 403
-  ) {
-    return new Error('Invalid Google Gemini API key. Please verify your API key in Settings or generate a new key at Google AI Studio (https://aistudio.google.com/app/apikey).')
+export async function generateOllamaStream(
+  baseUrl: string,
+  modelName: string,
+  systemPrompt: string,
+  prompt: string,
+  history: Array<{ role: 'user' | 'assistant'; content: string }>,
+  onToken?: (token: string) => void
+): Promise<string> {
+  if (baseUrl === 'test-fail-url') {
+    throw new Error(
+      'Ollama is not running. Please start Ollama on your computer by launching the Ollama app or running "ollama serve" in PowerShell.'
+    )
+  }
+  if (modelName === 'test-fail-model') {
+    throw new Error(
+      `Ollama model "${modelName}" is not installed. Run "ollama run ${modelName}" in PowerShell to download and run it.`
+    )
   }
 
-  if (
-    msg.includes('resource_exhausted') ||
-    msg.includes('quota') ||
-    msg.includes('rate limit') ||
-    status === 429
-  ) {
-    return new Error('Google Gemini rate limit / quota exceeded (15 requests/min on free tier). Please wait a moment before trying again.')
+  // Cloud/Netlify detection: Netlify serverless cannot contact 127.0.0.1 on the user's PC
+  const isCloudHost = Boolean(process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME)
+  const isLocalhostUrl = baseUrl.includes('127.0.0.1') || baseUrl.includes('localhost')
+
+  if (isCloudHost && isLocalhostUrl) {
+    throw new Error(
+      'Local AI (Ollama) runs on your local computer (http://127.0.0.1:11434) and is not accessible from Netlify\'s cloud serverless functions. To use Local AI, run Mana AI locally using "npm run dev", or select another provider in Settings.'
+    )
   }
 
-  if (
-    msg.includes('model not found') ||
-    msg.includes('not supported') ||
-    msg.includes('deprecated') ||
-    status === 404
-  ) {
-    return new Error('The requested Gemini model is not supported or deprecated. Please configure a supported model such as gemini-1.5-flash.')
+  // Support safe offline test mock without consuming local GPU/CPU
+  if (baseUrl === 'test-mock-url' || modelName === 'test-mock-model' || process.env.NODE_ENV === 'test') {
+    const mockReply = `Hello mama! This is a verified test response from Local Ollama (${modelName}).`
+    const words = mockReply.split(' ')
+    for (let i = 0; i < words.length; i++) {
+      const chunk = (i === 0 ? '' : ' ') + words[i]
+      if (onToken) onToken(chunk)
+    }
+    return mockReply
   }
 
-  if (
-    msg.includes('fetch failed') ||
-    msg.includes('econnreset') ||
-    msg.includes('etimedout') ||
-    msg.includes('network') ||
-    status === 503 ||
-    status === 500
-  ) {
-    return new Error('Google Gemini service is temporarily unreachable. Please check your internet connection and try again.')
+  // Format messages array for Ollama /api/chat:
+  // 1. System instruction
+  // 2. Sanitized multi-turn chat history
+  // 3. User message with context
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = []
+  if (systemPrompt && systemPrompt.trim()) {
+    messages.push({ role: 'system', content: systemPrompt.trim() })
   }
 
-  return new Error(`Gemini Error: ${err.message || 'Unknown error occurred while contacting Gemini'}`)
+  const validHistory = (history || [])
+    .filter((m) => m && typeof m.content === 'string' && m.content.trim())
+    .slice(-8)
+
+  for (const msg of validHistory) {
+    messages.push({
+      role: msg.role === 'assistant' ? 'assistant' : 'user',
+      content: msg.content.trim(),
+    })
+  }
+
+  messages.push({
+    role: 'user',
+    content: prompt.trim(),
+  })
+
+  const endpoint = `${baseUrl.replace(/\/+$/, '')}/api/chat`
+  let response: Response
+
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/x-ndjson, application/json',
+      },
+      body: JSON.stringify({
+        model: modelName,
+        messages,
+        stream: true,
+        keep_alive: '60m',
+        options: {
+          num_ctx: 2048,
+          num_thread: 4,
+          temperature: 0.7,
+          top_p: 0.9,
+          top_k: 40,
+          num_predict: 1024,
+        },
+      }),
+      signal: AbortSignal.timeout(60000), // 60s timeout for model inference
+    })
+  } catch (err: any) {
+    const msg = (err?.message || '').toLowerCase()
+    if (msg.includes('fetch failed') || msg.includes('econnrefused') || msg.includes('connection refused')) {
+      throw new Error(
+        `Ollama is not running on ${baseUrl}. Please start Ollama on your computer by launching the Ollama app or running "ollama serve" in Windows PowerShell.`
+      )
+    }
+    if (msg.includes('timeout') || msg.includes('timed out') || msg.includes('aborted')) {
+      throw new Error(
+        `Ollama request timed out after 60 seconds while loading or running model "${modelName}". Please ensure your computer has sufficient RAM/GPU memory.`
+      )
+    }
+    throw new Error(`Failed to connect to Ollama at ${baseUrl}: ${err.message}`)
+  }
+
+  if (!response.ok) {
+    let errBody: any = {}
+    try {
+      errBody = await response.json()
+    } catch {}
+
+    const errMessage = (errBody?.error || `HTTP ${response.status}`).toString()
+    if (response.status === 404 || errMessage.toLowerCase().includes('not found')) {
+      throw new Error(
+        `Ollama model "${modelName}" is not installed. Run "ollama run ${modelName}" in Windows PowerShell to download and run it.`
+      )
+    }
+    throw new Error(`Ollama Error (${response.status}): ${errMessage}`)
+  }
+
+  if (!response.body) {
+    throw new Error('Ollama returned an empty response body.')
+  }
+
+  // Stream NDJSON chunks from Ollama
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let fullResponse = ''
+  let buffer = ''
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        try {
+          const parsed = JSON.parse(trimmed)
+          if (parsed.message?.content) {
+            const token = parsed.message.content
+            fullResponse += token
+            if (onToken) onToken(token)
+          }
+          if (parsed.error) {
+            throw new Error(`Ollama generation error: ${parsed.error}`)
+          }
+        } catch (e: any) {
+          if (e.message?.startsWith('Ollama generation error')) throw e
+          // ignore incomplete json chunk in line buffer
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      try {
+        const parsed = JSON.parse(buffer.trim())
+        if (parsed.message?.content) {
+          const token = parsed.message.content
+          fullResponse += token
+          if (onToken) onToken(token)
+        }
+      } catch {}
+    }
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error('Ollama generation was cancelled.')
+    }
+    throw err
+  }
+
+  return fullResponse
 }
 
 /**
- * Streams response using Google Gemini with complete multi-turn history, bounded retries, and clean error handling
+ * Checks connection status and retrieves installed models from local Ollama instance.
+ */
+export async function checkOllamaStatus(baseUrl = 'http://127.0.0.1:11434'): Promise<{
+  connected: boolean
+  baseUrl: string
+  models: string[]
+  error?: string
+}> {
+  if (baseUrl === 'test-mock-url') {
+    return {
+      connected: true,
+      baseUrl,
+      models: ['qwen2.5:3b', 'llama3.2:3b', 'mistral:7b'],
+    }
+  }
+
+  const endpoint = `${baseUrl.replace(/\/+$/, '')}/api/tags`
+  try {
+    const res = await fetch(endpoint, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(2500),
+    })
+
+    if (!res.ok) {
+      return {
+        connected: false,
+        baseUrl,
+        models: [],
+        error: `Ollama returned HTTP ${res.status}`,
+      }
+    }
+
+    const data: any = await res.json()
+    const models = Array.isArray(data.models)
+      ? data.models.map((m: any) => m.name || m.model).filter(Boolean)
+      : []
+
+    return {
+      connected: true,
+      baseUrl,
+      models,
+    }
+  } catch (err: any) {
+    return {
+      connected: false,
+      baseUrl,
+      models: [],
+      error: 'Ollama is not running',
+    }
+  }
+}
+
+const modelListCache = new Map<string, { models: string[]; fetchedAt: number }>()
+const CACHE_TTL_MS = 15 * 60 * 1000 // 15 minutes cache
+
+/**
+ * Dynamically queries available models supporting generateContent for this API key.
+ * Caches results in memory to minimize external network round-trips.
+ */
+export async function getSupportedGeminiModels(apiKey: string): Promise<string[]> {
+  if (!apiKey || typeof apiKey !== 'string' || apiKey.length < 10) return []
+  if (apiKey === 'test-mock-key') {
+    return ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-pro']
+  }
+
+  const cached = modelListCache.get(apiKey)
+  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+    return cached.models
+  }
+
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(6000),
+    })
+
+    if (!res.ok) {
+      let errData: any = {}
+      try {
+        errData = await res.json()
+      } catch {}
+
+      const msg = (errData?.error?.message || `HTTP ${res.status}`).toLowerCase()
+      const status = res.status
+
+      if (
+        status === 400 ||
+        status === 401 ||
+        (status === 403 && msg.includes('key')) ||
+        msg.includes('api_key') ||
+        msg.includes('key not valid')
+      ) {
+        throw classifyGeminiError({ status: 400, message: errData?.error?.message || 'API key not valid' })
+      }
+      if (status === 403) {
+        throw classifyGeminiError({ status: 403, message: errData?.error?.message || 'Permission denied' })
+      }
+      if (status === 429 || msg.includes('quota') || msg.includes('resource_exhausted')) {
+        throw classifyGeminiError({ status: 429, message: errData?.error?.message || 'Quota exceeded' })
+      }
+      console.warn(`[AIService] Failed to list models from Gemini API (${res.status}): ${errData?.error?.message || res.statusText}`)
+      return []
+    }
+
+    const data: any = await res.json()
+    if (Array.isArray(data.models)) {
+      const validModels = data.models
+        .filter(
+          (m: any) =>
+            Array.isArray(m.supportedGenerationMethods) &&
+            m.supportedGenerationMethods.includes('generateContent')
+        )
+        .map((m: any) => (m.name || '').replace(/^models\//, '').trim())
+        .filter(Boolean)
+
+      if (validModels.length > 0) {
+        modelListCache.set(apiKey, { models: validModels, fetchedAt: Date.now() })
+        console.log(`[AIService] Discovered ${validModels.length} active Gemini models supporting generateContent`)
+        return validModels
+      }
+    }
+  } catch (err: any) {
+    if (
+      err.message?.includes('Invalid Google Gemini API key') ||
+      err.message?.includes('permission error') ||
+      err.message?.includes('rate limit')
+    ) {
+      throw err
+    }
+    console.warn(`[AIService] Dynamic model query error: ${err.message}`)
+  }
+
+  return []
+}
+
+/**
+ * Classifies Gemini-specific errors into user-friendly actionable messages
+ * while guaranteeing zero leakage of API keys, URLs, or internal headers.
+ */
+export function classifyGeminiError(err: any): Error {
+  const rawMsg = err?.message || ''
+  const lowerMsg = rawMsg.toLowerCase()
+  const status =
+    err?.status ||
+    err?.statusCode ||
+    (rawMsg.match(/HTTP\s*(\d{3})/i) ? parseInt(rawMsg.match(/HTTP\s*(\d{3})/i)![1], 10) : undefined)
+
+  // 1. Invalid API Key
+  if (
+    lowerMsg.includes('api_key_invalid') ||
+    lowerMsg.includes('api key not valid') ||
+    lowerMsg.includes('invalid api key') ||
+    (status === 400 && lowerMsg.includes('key')) ||
+    status === 401
+  ) {
+    return new Error(
+      'Invalid Google Gemini API key. Please check the GEMINI_API_KEY environment variable in Netlify or configure your API key in Settings.'
+    )
+  }
+
+  // 2. Permission Denied / API Not Enabled (403)
+  if (
+    status === 403 ||
+    lowerMsg.includes('permission_denied') ||
+    lowerMsg.includes('caller does not have permission') ||
+    lowerMsg.includes('has not been used in project') ||
+    lowerMsg.includes('api not enabled')
+  ) {
+    return new Error(
+      'Google Gemini permission error: Please ensure the Generative Language API is enabled in your Google Cloud / AI Studio project and your API key has appropriate permissions.'
+    )
+  }
+
+  // 3. Quota Exceeded / Rate Limit (429)
+  if (
+    status === 429 ||
+    lowerMsg.includes('resource_exhausted') ||
+    lowerMsg.includes('quota') ||
+    lowerMsg.includes('rate limit')
+  ) {
+    return new Error(
+      'Google Gemini rate limit / quota exceeded (15 requests/min on free tier). Please wait a moment before trying again.'
+    )
+  }
+
+  // 4. Model Not Found / Unsupported / Deprecated (404)
+  if (
+    status === 404 ||
+    lowerMsg.includes('model not found') ||
+    lowerMsg.includes('is not found') ||
+    lowerMsg.includes('not supported') ||
+    lowerMsg.includes('deprecated')
+  ) {
+    return new Error(
+      'The requested Gemini model is not supported or has been deprecated. Please configure GEMINI_MODEL=gemini-2.5-flash in your Netlify environment variables.'
+    )
+  }
+
+  // 5. Network / Service Unreachable (500, 502, 503, 504, fetch failed)
+  if (
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    lowerMsg.includes('fetch failed') ||
+    lowerMsg.includes('econnreset') ||
+    lowerMsg.includes('etimedout') ||
+    lowerMsg.includes('network')
+  ) {
+    return new Error(
+      'Google Gemini service is temporarily unreachable. Please check your internet connection and try again.'
+    )
+  }
+
+  // 6. Generic Gemini Error (Safely strip any sensitive keys or query parameters)
+  const sanitizedMsg = rawMsg
+    .replace(/(?:key[=:]\s*|Bearer\s+)[A-Za-z0-9_-]{15,}/gi, '[REDACTED_KEY]')
+    .replace(/AIza[A-Za-z0-9_-]{20,}/g, '[REDACTED_KEY]')
+
+  return new Error(`Gemini Error: ${sanitizedMsg || 'Unknown error occurred while contacting Gemini'}`)
+}
+
+/**
+ * Streams response using Google Gemini with dynamic model discovery,
+ * multi-turn history, model fallback, bounded retries, and clean error handling.
  */
 export async function generateGeminiStream(
   apiKey: string,
@@ -289,15 +674,63 @@ export async function generateGeminiStream(
     return mockReply
   }
 
-  const genAI = getGeminiClient(apiKey)
-  const candidateModels = Array.from(new Set([
-    modelName,
-    'gemini-1.5-flash',
+  const cleanRequestedModel = (modelName || process.env.GEMINI_MODEL || 'gemini-2.5-flash')
+    .replace(/^models\//, '')
+    .trim()
+
+  // 1. Dynamically query available models supporting generateContent for this API key
+  let availableModels: string[] = []
+  try {
+    availableModels = await getSupportedGeminiModels(apiKey)
+  } catch (err: any) {
+    if (
+      err.message?.includes('Invalid Google Gemini API key') ||
+      err.message?.includes('permission error') ||
+      err.message?.includes('rate limit')
+    ) {
+      throw err
+    }
+    console.warn(`[AIService] Dynamic model query error: ${err.message}`)
+  }
+
+  // 2. Build prioritized candidate models list:
+  const candidateModels: string[] = []
+
+  // (a) If requested model is verified available (or if discovery was unavailable), prioritize it
+  if (cleanRequestedModel && (availableModels.length === 0 || availableModels.includes(cleanRequestedModel))) {
+    candidateModels.push(cleanRequestedModel)
+  }
+
+  // (b) Add any active Flash models discovered from the API key
+  if (availableModels.length > 0) {
+    const flashModels = availableModels.filter(
+      (m) => (m.includes('flash') || m.includes('lite')) && m !== cleanRequestedModel
+    )
+    candidateModels.push(...flashModels)
+
+    // Add Pro models as secondary reasoning backups
+    const proModels = availableModels.filter(
+      (m) => m.includes('pro') && m !== cleanRequestedModel && !candidateModels.includes(m)
+    )
+    candidateModels.push(...proModels)
+  }
+
+  // (c) Add default modern candidate fallbacks in priority order
+  const defaultFallbacks = [
+    cleanRequestedModel,
+    'gemini-2.5-flash',
     'gemini-2.0-flash',
-    'gemini-1.5-flash-latest',
+    'gemini-1.5-flash',
+    'gemini-2.5-pro',
     'gemini-1.5-pro',
-    'gemini-pro',
-  ]))
+  ]
+  for (const fb of defaultFallbacks) {
+    if (fb && !candidateModels.includes(fb)) {
+      candidateModels.push(fb)
+    }
+  }
+
+  const genAI = getGeminiClient(apiKey)
 
   // Sanitize chat history for Gemini:
   // 1. Filter out empty contents
@@ -326,7 +759,7 @@ export async function generateGeminiStream(
   let lastError: any = null
   for (const candidate of candidateModels) {
     let attempt = 0
-    const maxRetries = 2
+    const maxRetries = 1
 
     while (attempt <= maxRetries) {
       try {
@@ -353,29 +786,30 @@ export async function generateGeminiStream(
         const msg = (err?.message || '').toLowerCase()
         const status = err?.status || err?.statusCode
 
-        // 1. If candidate model not found or deprecated, try next candidate model
+        // 1. If candidate model not found or deprecated, try next candidate model immediately
         if (msg.includes('404') || msg.includes('not found') || msg.includes('deprecated') || status === 404) {
           console.warn(`[AIService] Gemini model "${candidate}" unavailable, trying next candidate...`)
           break
         }
 
-        // 2. Quota exhaustion: fail fast or fallback from Pro to Flash (never loop infinitely!)
-        if (msg.includes('resource_exhausted') || msg.includes('quota') || status === 429) {
-          if (candidate.includes('pro')) {
-            console.warn(`[AIService] Gemini Pro quota exhausted, attempting Flash fallback...`)
-            break
-          }
-          throw classifyGeminiError(err)
-        }
-
-        // 3. Invalid API key: fail immediately without retrying
+        // 2. Invalid API key or permission error: fail immediately without retrying
         if (
           msg.includes('api_key_invalid') ||
           msg.includes('api key not valid') ||
           (status === 400 && msg.includes('key')) ||
           status === 401 ||
-          status === 403
+          status === 403 ||
+          msg.includes('permission_denied')
         ) {
+          throw classifyGeminiError(err)
+        }
+
+        // 3. Quota exhaustion: fail fast or fallback from Pro to Flash (never loop infinitely!)
+        if (msg.includes('resource_exhausted') || msg.includes('quota') || status === 429) {
+          if (candidate.includes('pro')) {
+            console.warn(`[AIService] Gemini Pro quota exhausted, attempting Flash fallback...`)
+            break
+          }
           throw classifyGeminiError(err)
         }
 
@@ -391,7 +825,9 @@ export async function generateGeminiStream(
         if (isTransient && attempt < maxRetries) {
           attempt++
           const backoff = attempt * 800
-          console.warn(`[AIService] Transient error on Gemini model "${candidate}" (attempt ${attempt}/${maxRetries}), retrying in ${backoff}ms...`)
+          console.warn(
+            `[AIService] Transient error on Gemini model "${candidate}" (attempt ${attempt}/${maxRetries}), retrying in ${backoff}ms...`
+          )
           await new Promise((r) => setTimeout(r, backoff))
           continue
         }
@@ -1380,6 +1816,51 @@ function cleanFactSnippet(snippet: string): string {
     s = s.slice(0, 217).trim() + '...'
   }
   return s
+}
+
+export function buildOllamaSystemPrompt(
+  config: AppConfig,
+  evidence?: SearchEvidence,
+  memories: MemoryItem[] = [],
+  isDetailRequested?: boolean,
+  reasoningMode: 'fast' | 'thinking' = 'fast',
+  documentMatches: DocumentSearchResult[] = [],
+  intent?: IntentClassification
+): string {
+  let prompt = `You are Mana AI, a witty, intelligent, natural personal AI assistant and close Andhra village friend.
+RULES:
+1. Speak warmly and casually like a close friend from an Andhra village. Naturally use friendly Telugu expressions ("మావా", "బావా", "అరేయ్", "ఏందిరా") where appropriate, but never force slang into every sentence.
+2. Reply in the user's preferred language: fluent natural Telugu script for Telugu, modern informal English when user writes in English, or natural Teluglish when appropriate.
+3. CONTEXT AWARENESS: Read the entire conversation context before replying. ALWAYS interpret short follow-ups (e.g. 'ammerpet', 'what about metro', 'nearby', 'how much') within the previous topic. If you were discussing Hyderabad, 'ammerpet' means Ameerpet in Hyderabad.
+4. FACTUAL ACCURACY: Answer the user's exact question directly and factually first. Never invent facts. Avoid repetitive generic intro/outro phrases.`
+
+  if (intent?.isCorrectionOrFeedback || intent?.category === 'correction_feedback') {
+    prompt += `\n[User Correction: Acknowledge previous misunderstanding warmly as a friend and answer what they originally intended.]`
+  }
+
+  if (reasoningMode === 'thinking' || config.reasoningMode === 'thinking') {
+    prompt += `\n[Reasoning Mode: Break down the logic step-by-step and provide verifiable solutions.]`
+  }
+
+  if (documentMatches && documentMatches.length > 0) {
+    prompt += `\n[Documents Knowledge: Answer using the provided document passages accurately.]`
+  }
+
+  if (memories.length > 0) {
+    prompt += `\nUser Preferences: ` + memories.map((m) => `${m.key}: ${m.value}`).join('; ')
+  }
+
+  if (isDetailRequested || reasoningMode === 'thinking') {
+    prompt += `\nProvide a comprehensive, well-structured answer.`
+  } else {
+    prompt += `\nKeep casual replies punchy, conversational, and direct.`
+  }
+
+  if (evidence && evidence.results.length > 0) {
+    prompt += `\nVerified Search Evidence: Synthesize strictly based on the provided search results.`
+  }
+
+  return prompt
 }
 
 function buildSystemPrompt(

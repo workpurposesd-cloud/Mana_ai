@@ -6,7 +6,7 @@ import path from 'path'
 import { configService } from './services/configService.js'
 import { classifyIntent } from './services/intentClassifier.js'
 import { executeWebSearch, fetchWikipediaKnowledge } from './services/searchService.js'
-import { generateAIResponse } from './services/aiService.js'
+import { generateAIResponse, checkOllamaStatus } from './services/aiService.js'
 import { memoryService } from './services/memoryService.js'
 import { authService } from './services/authService.js'
 import { chatHistoryService } from './services/chatHistoryService.js'
@@ -291,6 +291,19 @@ app.post('/api/config', (req, res) => {
 })
 
 /**
+ * Check local Ollama health status & list installed models
+ */
+app.get('/api/ollama/status', async (req, res) => {
+  const config = configService.getConfig()
+  const baseUrl = (req.query.baseUrl as string) || config.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434'
+  const status = await checkOllamaStatus(baseUrl)
+  res.json({
+    ...status,
+    activeModel: config.ollamaModel || config.modelName || process.env.OLLAMA_MODEL || 'qwen2.5:3b',
+  })
+})
+
+/**
  * Memory Management Endpoints
  */
 app.get('/api/memories', async (_req, res) => {
@@ -505,6 +518,8 @@ app.post('/api/chat/stream', chatLimiter, async (req, res) => {
     reasoningMode,
     aiProvider,
     modelName,
+    ollamaBaseUrl,
+    ollamaModel,
     geminiApiKey,
     openaiApiKey,
     groqApiKey,
@@ -524,6 +539,9 @@ app.post('/api/chat/stream', chatLimiter, async (req, res) => {
 
   const sendEvent = (event: string, data: any) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+    if (typeof (res as any).flush === 'function') {
+      ;(res as any).flush()
+    }
   }
 
   const authUser = getAuthUser(req)
@@ -537,6 +555,8 @@ app.post('/api/chat/stream', chatLimiter, async (req, res) => {
         reasoningMode,
         aiProvider,
         modelName,
+        ollamaBaseUrl,
+        ollamaModel,
         geminiApiKey,
         openaiApiKey,
         groqApiKey,
@@ -576,6 +596,8 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       reasoningMode,
       aiProvider,
       modelName,
+      ollamaBaseUrl,
+      ollamaModel,
       geminiApiKey,
       openaiApiKey,
       groqApiKey,
@@ -593,6 +615,8 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       reasoningMode,
       aiProvider,
       modelName,
+      ollamaBaseUrl,
+      ollamaModel,
       geminiApiKey,
       openaiApiKey,
       groqApiKey,
