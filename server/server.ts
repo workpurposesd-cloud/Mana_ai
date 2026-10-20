@@ -247,7 +247,7 @@ app.get('/api/test-blobs', async (_req, res) => {
     const testKey = `test-${Date.now()}`
     const testData = { hello: 'world', timestamp: Date.now() }
     await blobsStore.setJSON(testKey, testData)
-    const readBack = await blobsStore.get(testKey, { type: 'json', consistency: 'strong' })
+    const readBack = await blobsStore.get(testKey, { type: 'json' })
     await blobsStore.delete(testKey)
     res.json({ success: true, written: testData, readBack })
   } catch (err: any) {

@@ -38,7 +38,13 @@ class AuthService {
 
   public async refreshFromDb(): Promise<void> {
     try {
-      this.users = await dbService.getFresh<User[]>('users', this.users)
+      const stored = await dbService.getFresh<User[]>('users', this.users)
+      if (Array.isArray(stored) && stored.length > 0) {
+        const userMap = new Map<string, User>()
+        for (const u of stored) userMap.set(u.id, u)
+        for (const u of this.users) userMap.set(u.id, u)
+        this.users = Array.from(userMap.values())
+      }
     } catch {}
   }
 

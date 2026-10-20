@@ -19,7 +19,13 @@ class ChatHistoryService {
 
   public async refreshFromDb(): Promise<void> {
     try {
-      this.sessions = await dbService.getFresh<ChatSession[]>('chats', this.sessions)
+      const stored = await dbService.getFresh<ChatSession[]>('chats', this.sessions)
+      if (Array.isArray(stored) && stored.length > 0) {
+        const sessionMap = new Map<string, ChatSession>()
+        for (const s of stored) sessionMap.set(s.id, s)
+        for (const s of this.sessions) sessionMap.set(s.id, s)
+        this.sessions = Array.from(sessionMap.values())
+      }
     } catch {}
   }
 

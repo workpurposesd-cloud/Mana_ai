@@ -117,7 +117,12 @@ class DatabaseService {
     const blobsStore = this.getBlobsStore()
     if (blobsStore) {
       try {
-        const val = await blobsStore.get(collection, { type: 'json', consistency: 'strong' })
+        let val: any = null
+        try {
+          val = await blobsStore.get(collection, { type: 'json', consistency: 'strong' })
+        } catch {
+          val = await blobsStore.get(collection, { type: 'json' })
+        }
         if (val !== null && val !== undefined) {
           this.memoryCache.set(collection, val)
           return val as T

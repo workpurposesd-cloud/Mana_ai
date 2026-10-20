@@ -8,6 +8,10 @@ async function run() {
   const health = await healthRes.json()
   console.log('Health response:', JSON.stringify(health, null, 2))
 
+  const testBlobsRes = await fetch(`${BASE_URL}/api/test-blobs`)
+  const testBlobs = await testBlobsRes.json()
+  console.log('Blobs write/read roundtrip:', JSON.stringify(testBlobs, null, 2))
+
   console.log('\n=== TEST 2: Image Generation (FLUX.1 - Watermark Free) ===')
   const imgRes = await fetch(`${BASE_URL}/api/generate/image`, {
     method: 'POST',
