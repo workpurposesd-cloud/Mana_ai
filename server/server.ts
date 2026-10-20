@@ -35,6 +35,16 @@ app.use(
 )
 app.use(express.json({ limit: '5mb' }))
 
+// Normalize Netlify serverless function path prefixes so routes match seamlessly
+app.use((req, _res, next) => {
+  if (req.url.startsWith('/.netlify/functions/api')) {
+    req.url = req.url.replace('/.netlify/functions/api', '/api')
+  } else if (!req.url.startsWith('/api') && !req.url.startsWith('/.netlify')) {
+    req.url = '/api' + (req.url.startsWith('/') ? req.url : '/' + req.url)
+  }
+  next()
+})
+
 // Serve static media (images, video previews) with correct MIME types for all formats
 app.use('/api/media', express.static(MEDIA_DIR, {
   setHeaders: (res, filePath) => {
