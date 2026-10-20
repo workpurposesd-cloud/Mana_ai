@@ -121,7 +121,7 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
   // translation hallucinations (e.g. "Bottakokane") and external 429 rate limits.
   const isConversationalTeluglish =
     /[\u0C00-\u0C7F]/.test(cleanPrompt) ||
-    /\b(nenu inka bathike unna|inka bathike unna|bathike unna|bathiki unna|nenu unna|chachipoledu|chavaledu|em chestunnav|em chesthunnav|em peekuthunnav|ela unnav|ela unnaru|bavunnava|bagunnava|kushalama|thinnava|tinnava|bhojanam|bore kodutondi|bore kottiddi|chala bore|bore mama|nidra vastondi|padukuntunna|nidra potunna|ippude lecha|lecha mama|cheppu mama|cheppu ra|orey mama|enti ra mama|em scene|em sangathi|ayyo ra|lite theesko|dobbey|po ra|musukoni|sare mama|avuna mama|nijama|kaburlu|sollu|visugu|mood ledu|mood off|tension ga undi|kashtam ga undi|hello hay|hello hey|wassup|what's up|whats up|how are you|how r u|i'm bored|im bored|teach me (common )?(english )?(bad|swear|curse) words|puka|chetha na kodaka|lamidi lodaka|bokka|dunnapotha|waste fellow|health problem|chest pain|hospital|financial|loan|emi|git push|netlify|java|mama|orey|arey|babu|saami|marchipoya|delete chesa|commit cheyyakunda)\b/i.test(cleanPrompt)
+    /\b(nenu inka bathike unna|inka bathike unna|bathike unna|bathiki unna|nenu unna|chachipoledu|chavaledu|em chestunnav|em chesthunnav|em peekuthunnav|ela unnav|ela unnaru|bavunnava|bagunnava|kushalama|thinnava|tinnava|bhojanam|bore kodutondi|bore kottiddi|chala bore|bore mama|nidra vastondi|padukuntunna|nidra potunna|ippude lecha|lecha mama|cheppu mama|cheppu ra|orey mama|enti ra mama|em scene|em sangathi|ayyo ra|lite theesko|dobbey|po ra|musukoni|sare mama|avuna mama|nijama|kaburlu|sollu|visugu|mood ledu|mood off|tension ga undi|kashtam ga undi|hello hay|hello hey|wassup|what's up|whats up|how are you|how r u|i'm bored|im bored|teach me (common )?(english )?(bad|swear|curse) words|puka|chetha na kodaka|lamidi lodaka|bokka|dunnapotha|waste fellow|health problem|chest pain|hospital|financial|loan|emi|git push|netlify|java|mama|orey|arey|babu|saami|marchipoya|delete chesa|commit cheyyakunda|talk (only )?in english|speak (only )?in english)\b/i.test(cleanPrompt)
 
   if (isConversationalTeluglish && (!activeGeminiKey && !config.openaiApiKey && !config.groqApiKey)) {
     return await generateContextualSmartResponse(
@@ -343,6 +343,17 @@ async function generateContextualSmartResponse(
     const match = clean.match(/(?:my name is|call me|i am|i'm)\s+([a-zA-Z0-9_-]+)/i)
     const name = match ? match[1] : 'friend'
     answer = `👋 Orey ${name}! Awesome to meet you mama! 😊 Saved your name in memory, so I won't forget. Cheppu ra, what's on your mind today?`
+  }
+
+  // 0a. CANONICAL MANA AI TELUGU FRIEND EXAMPLES & DIRECT INQUIRIES
+  else if (/^hi\s+bro[!?.]*$/i.test(clean)) {
+    answer = `అరేయ్ మావా! 😂 ఏం సంగతులు? ఈరోజు ఏం ప్లాన్, చెప్పు చూద్దాం!`
+  } else if (/^(tell me something( interesting)?|something interesting)[!?.]*$/i.test(clean)) {
+    answer = `మావా, ఒక నిజమైన ఫ్యాక్ట్ చెప్తా! 🐙 ఆక్టోపస్కు మూడు గుండెలు ఉంటాయి. రెండు గుండెలు మొప్పలకు రక్తాన్ని పంపిస్తాయి; మూడోది శరీరానికి పంపిస్తుంది. ప్రకృతి డిజైన్ మామూలుగా లేదురా బావా! ఇంకో సైన్స్ ఫ్యాక్ట్ కావాలా?`
+  } else if (/^(i am feeling (very )?sad|feeling very sad|feeling sad|i feel very sad|i feel sad)[!?.]*$/i.test(clean)) {
+    answer = `అయ్యో మావా, ఏమైంది రా? చెప్పాలనిపిస్తే నాతో మాట్లాడు. నేను జోకులు పక్కన పెట్టి ముందు నీ మాట వింటా.`
+  } else if (/^what is java[!?.]*$/i.test(clean)) {
+    answer = `Java is a programming language used to build web applications, backend systems, Android apps, and enterprise software. కావాలంటే మావా, ఒక చిన్న code example తో కూడా explain చేస్తా.`
   }
 
   // 1a. SERIOUS HEALTH & MEDICAL CONCERNS (COMPASSIONATE & EMPATHETIC - STRICTLY ZERO JOKES OR SWEARING)
