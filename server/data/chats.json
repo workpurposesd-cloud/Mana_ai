@@ -1,5 +1,222 @@
 [
   {
+    "id": "session-1792505286735-1ahl",
+    "userId": "usr-1792415663553-vh5d",
+    "title": "now tell me",
+    "createdAt": "2026-10-20T14:08:26.763Z",
+    "updatedAt": "2026-10-20T14:10:20.339Z",
+    "messages": [
+      {
+        "id": "user-1792505286736",
+        "role": "user",
+        "content": "now tell me",
+        "timestamp": 1792505286736
+      },
+      {
+        "id": "assistant-1792505286736",
+        "role": "assistant",
+        "content": "బావా, మీ మహాయేయం తెలిపండటం! మీ మహాయేయం కు ఎంటుకుందాన్ని ప్రస్తావించండి.",
+        "timestamp": 1792505286736
+      },
+      {
+        "id": "user-1792505324104",
+        "role": "user",
+        "content": "i didnt get what your saying",
+        "timestamp": 1792505324104
+      },
+      {
+        "id": "assistant-1792505324104",
+        "role": "assistant",
+        "content": "బావా, మీ మహాయేయం కు ఎంటుకుందాన్ని ప్రస్తావించండి. మీ మహాయేయం కాది మధ్య ఎంటుకుందాన్ని తెలిపండటం. మీ మహాయేయం కాది కాది విషయాలు ప్రామాణికంగా తెలిపాండటం.",
+        "timestamp": 1792505324104
+      },
+      {
+        "id": "user-1792505365967",
+        "role": "user",
+        "content": "give me reply in english only",
+        "timestamp": 1792505365967
+      },
+      {
+        "id": "assistant-1792505365967",
+        "role": "assistant",
+        "content": "Sure thing! How's your day been so far? 😊",
+        "timestamp": 1792505365967
+      },
+      {
+        "id": "user-1792505391546",
+        "role": "user",
+        "content": "ok do you know vizag",
+        "timestamp": 1792505391546
+      },
+      {
+        "id": "assistant-1792505391546",
+        "role": "assistant",
+        "content": "Yes, I know Vizag well! It's a beautiful city with lots of history and culture. How can I assist you with Vizag today? 😊",
+        "timestamp": 1792505391546
+      },
+      {
+        "id": "user-1792505413996",
+        "role": "user",
+        "content": "vizag  one more name",
+        "timestamp": 1792505413996
+      },
+      {
+        "id": "assistant-1792505413996",
+        "role": "assistant",
+        "content": "Sure thing! Vizag has another name too. It's also known as Vishakhapatnam. 🌊😄",
+        "timestamp": 1792505413996
+      }
+    ]
+  },
+  {
+    "id": "session-1792505025325-osmi",
+    "userId": "user-alpha",
+    "title": "User A Secret Chat",
+    "createdAt": "2026-10-20T14:03:45.325Z",
+    "updatedAt": "2026-10-20T14:03:45.339Z",
+    "messages": [
+      {
+        "id": "m1",
+        "role": "user",
+        "content": "Secret Alpha",
+        "timestamp": 1792505025338
+      }
+    ]
+  },
+  {
+    "id": "session-1792504833816-phec",
+    "userId": "user-alpha",
+    "title": "User A Secret Chat",
+    "createdAt": "2026-10-20T14:00:33.816Z",
+    "updatedAt": "2026-10-20T14:00:33.826Z",
+    "messages": [
+      {
+        "id": "m1",
+        "role": "user",
+        "content": "Secret Alpha",
+        "timestamp": 1792504833826
+      }
+    ]
+  },
+  {
+    "id": "session-1792504771281-3c5o",
+    "userId": "usr-1792415663553-vh5d",
+    "title": "hi",
+    "createdAt": "2026-10-20T14:00:10.976Z",
+    "updatedAt": "2026-10-20T14:01:46.879Z",
+    "messages": [
+      {
+        "id": "user-1792504771281",
+        "role": "user",
+        "content": "hi",
+        "timestamp": 1792504771281
+      },
+      {
+        "id": "assistant-1792504771281",
+        "role": "assistant",
+        "content": "Hey there! మావా! అరేయ్ అన్ని ప్రపంచంలో మీకు సమానం అంటేది. కొన్నిపోయింది చటటం అన్ని సమావేశంలో మీకు ప్రయాణం. 😊",
+        "timestamp": 1792504771281
+      },
+      {
+        "id": "user-1792504844684",
+        "role": "user",
+        "content": "hi message you took 8seconds of time if i ask anything big",
+        "timestamp": 1792504844684
+      },
+      {
+        "id": "assistant-1792504844684",
+        "role": "assistant",
+        "content": "Hey there! మావా! అన్ని దిశలో మీకు సమానం అంటేది. మీ సమావేశన్లో మీకు ప్రయాణం అంటేది. కానీ క్యాప్స్లెటర్ సమాధా\n\n⚠️ **Error**: The operation was aborted due to timeout",
+        "timestamp": 1792504844684,
+        "searchEvidence": {
+          "query": "hi message you took 8seconds of time if i ask anything big",
+          "provider": "duckduckgo",
+          "results": [
+            {
+              "id": "search-1",
+              "title": "Text scams: Why you shouldn't answer 'Hi, How Are You?' text messages ...",
+              "url": "https://www.bitdefender.com/en-gb/blog/hotforsecurity/hi-how-are-you-text-message-scams",
+              "snippet": "Have you ever received a random text message from a stranger greeting you with a single \"Hello\" or something like \"Hi, How are you?\" Despite seeming innocuous at first, this general conversation starter could launch a bigger plan to scam you.",
+              "domain": "bitdefender.com",
+              "isOfficialOrReputable": false
+            },
+            {
+              "id": "search-2",
+              "title": "\"Can I talk for a second?\" The latest scam on WhatsApp",
+              "url": "https://www.thevermilion.com/can-i-talk-for-a-second-the-latest-scam-on-whatsapp/article_8823/",
+              "snippet": "Maximum attention must always be paid, especially when the sender is unknown and the content immediately seems strange. How we contact you In this specific case, there are many users who have sent reports about strange messages they have received on WhatsApp which always start with the same request. \" Hi, can I talk about it for a moment? \".",
+              "domain": "thevermilion.com",
+              "isOfficialOrReputable": false
+            },
+            {
+              "id": "search-3",
+              "title": "I just got my first scambait text. Can they do something to my ... - Reddit",
+              "url": "https://www.reddit.com/r/scambait/comments/18aubm9/i_just_got_my_first_scambait_text_can_they_do/",
+              "snippet": "Like i got a message on whatsapp and i know its a scam from a chinese guy or smth because i love the content here on this subreddit. So can they fuck sth with my phone number or hack me without me clicking any links?!?! For context, this is what he send me: \"Hi, Do you have a minute? Can we have a quick talk?\"",
+              "domain": "reddit.com",
+              "isOfficialOrReputable": false
+            },
+            {
+              "id": "search-4",
+              "title": "What Does It Mean When a Guy Texts Back Quickly? Decode His ... - wikiHow",
+              "url": "https://www.wikihow.com/When-a-Guy-Responds-Quickly-to-Your-Texts",
+              "snippet": "Sometimes he texts you back right away and other times, he takes his time. What does it all mean? Let's dive right in and decode what your guy's texting speed means for how he thinks about you. He's definitely interested if his texts are...",
+              "domain": "wikihow.com",
+              "isOfficialOrReputable": false
+            },
+            {
+              "id": "search-5",
+              "title": "Have you received this text? Be careful, it's a scam! - wgrz.com",
+              "url": "https://www.wgrz.com/article/news/local/bbb-warns-people-of-text-message-scam-wrong-number-better-business-bureau/71-ec8b78d8-c12b-45de-a8fc-eb4e167f165e",
+              "snippet": "The BBB says they received several reports over the weekend through their Scam Tracker of a text scam. While it may look innocent, they say it is a scam.",
+              "domain": "wgrz.com",
+              "isOfficialOrReputable": false
+            }
+          ],
+          "totalFound": 5,
+          "searchedAt": "2026-10-20T14:00:46.779Z",
+          "tookMs": 2071
+        }
+      }
+    ]
+  },
+  {
+    "id": "session-1792504477515-4w9a",
+    "userId": "user-alpha",
+    "title": "User A Secret Chat",
+    "createdAt": "2026-10-20T13:54:37.515Z",
+    "updatedAt": "2026-10-20T13:54:37.528Z",
+    "messages": [
+      {
+        "id": "m1",
+        "role": "user",
+        "content": "Secret Alpha",
+        "timestamp": 1792504477528
+      }
+    ]
+  },
+  {
+    "id": "session-1792503741286-5n4m",
+    "userId": "usr-1792415663553-vh5d",
+    "title": "hi",
+    "createdAt": "2026-10-20T13:42:43.198Z",
+    "updatedAt": "2026-10-20T13:42:43.198Z",
+    "messages": [
+      {
+        "id": "user-1792503741286",
+        "role": "user",
+        "content": "hi",
+        "timestamp": 1792503741286
+      },
+      {
+        "id": "assistant-1792503741286",
+        "role": "assistant",
+        "content": "Hey there! How's it going? Any good stories to share? 😊",
+        "timestamp": 1792503741286
+      }
+    ]
+  },
+  {
     "id": "session-1792501614081-04od",
     "userId": "user-alpha",
     "title": "User A Secret Chat",
