@@ -49,14 +49,39 @@ class AuthService {
   }
 
   public hashPassword(password: string): string {
-    return crypto.createHash('sha256').update(password + '_mana_secure_salt_2026').digest('hex')
+    const salt = crypto.randomBytes(16).toString('hex')
+    const derived = crypto.scryptSync(password, salt, 64).toString('hex')
+    return `scrypt:${salt}:${derived}`
+  }
+
+  public verifyPassword(password: string, storedHash: string): boolean {
+    if (!storedHash || typeof storedHash !== 'string') return false
+
+    // Modern scrypt verification with constant-time equality check
+    if (storedHash.startsWith('scrypt:')) {
+      const parts = storedHash.split(':')
+      if (parts.length !== 3) return false
+      const [, salt, expectedHash] = parts
+      const derived = crypto.scryptSync(password, salt, 64).toString('hex')
+      try {
+        return crypto.timingSafeEqual(Buffer.from(derived, 'hex'), Buffer.from(expectedHash, 'hex'))
+      } catch {
+        return false
+      }
+    }
+
+    // Legacy SHA-256 verification (for safe, seamless zero-downtime migration)
+    const legacy2026 = crypto.createHash('sha256').update(password + '_mana_secure_salt_2026').digest('hex')
+    const legacyOld = crypto.createHash('sha256').update(password + '_mana_salt').digest('hex')
+
+    return storedHash === legacy2026 || storedHash === legacyOld
   }
 
   public async signup(
     name: string,
     email: string,
     password: string
-  ): Promise<{ user: Omit<User, 'passwordHash'>; token: string }> {
+  ): Promise<{ user: Omit<User, 'passwordHash' | 'geminiApiKey'>; token: string }> {
     await this.refreshFromDb()
 
     const cleanEmail = email.toLowerCase().trim()
@@ -89,14 +114,13 @@ class AuthService {
     await dbService.set('users', this.users)
 
     const token = this.generateToken(newUser)
-    const { passwordHash, ...userWithoutPassword } = newUser
-    return { user: userWithoutPassword, token }
+    return { user: this.sanitizeUser(newUser), token }
   }
 
   public async login(
     email: string,
     password: string
-  ): Promise<{ user: Omit<User, 'passwordHash'>; token: string }> {
+  ): Promise<{ user: Omit<User, 'passwordHash' | 'geminiApiKey'>; token: string }> {
     await this.refreshFromDb()
 
     const cleanEmail = email.toLowerCase().trim()
@@ -106,23 +130,20 @@ class AuthService {
       throw new Error('Invalid email or password. Please check your credentials.')
     }
 
-    const hash = this.hashPassword(password)
-    // Support legacy salt migration if necessary
-    const legacyHash = crypto.createHash('sha256').update(password + '_mana_salt').digest('hex')
-
-    if (user.passwordHash !== hash && user.passwordHash !== legacyHash) {
+    const isValid = this.verifyPassword(password, user.passwordHash)
+    if (!isValid) {
       throw new Error('Invalid email or password. Please check your credentials.')
     }
 
-    // If logged in with legacy hash, upgrade to current salt
-    if (user.passwordHash === legacyHash) {
-      user.passwordHash = hash
+    // Safe zero-downtime migration: if stored hash is legacy SHA-256, upgrade to scrypt
+    if (!user.passwordHash.startsWith('scrypt:')) {
+      console.log(`[AuthService] Migrating user ${cleanEmail} password hash to scrypt`)
+      user.passwordHash = this.hashPassword(password)
       await dbService.set('users', this.users)
     }
 
     const token = this.generateToken(user)
-    const { passwordHash, ...userWithoutPassword } = user
-    return { user: userWithoutPassword, token }
+    return { user: this.sanitizeUser(user), token }
   }
 
   public async resetPassword(email: string, newPassword: string): Promise<boolean> {
@@ -160,7 +181,16 @@ class AuthService {
     return `${payloadB64}.${sig}`
   }
 
-  public verifyToken(token: string): Omit<User, 'passwordHash'> | null {
+  private sanitizeUser(user: User): Omit<User, 'passwordHash' | 'geminiApiKey'> {
+    const { passwordHash, geminiApiKey, ...safe } = user
+    return safe
+  }
+
+  public getUserById(id: string): User | undefined {
+    return this.users.find((u) => u.id === id)
+  }
+
+  public verifyToken(token: string): Omit<User, 'passwordHash' | 'geminiApiKey'> | null {
     try {
       if (!token || typeof token !== 'string') return null
 
@@ -185,8 +215,7 @@ class AuthService {
       // Check current in-memory cache
       const user = this.users.find((u) => u.id === payload.id)
       if (user) {
-        const { passwordHash, ...userWithoutPassword } = user
-        return userWithoutPassword
+        return this.sanitizeUser(user)
       }
 
       // If user signed up on another container or cold boot, verified HMAC payload provides identity

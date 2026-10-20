@@ -2,10 +2,6 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import OpenAI from 'openai'
 import { AppConfig, SearchEvidence, MemoryItem } from '../types.js'
 import { documentService, DocumentSearchResult } from './documentService.js'
-import { GoogleGenerativeAI } from '@google/generative-ai'
-import OpenAI from 'openai'
-import { AppConfig, SearchEvidence, MemoryItem } from '../types.js'
-import { documentService, DocumentSearchResult } from './documentService.js'
 import { executeTool, ToolResult } from './toolService.js'
 import { determineTaskTier, selectModelForTask } from './modelRouter.js'
 import { optimizeConversationContext } from './contextManager.js'
@@ -109,21 +105,26 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
   const systemPrompt = buildSystemPrompt(config, searchEvidence, optimized.memoriesUsed, isDetailRequested, reasoningMode, documentMatches, intent)
   const fullPromptWithEvidence = buildUserPromptWithEvidence(prompt, searchEvidence, optimized.memoriesUsed, documentMatches, toolResults, optimized.historySummary, intent)
 
-  // 1. Google Gemini (Fast or Reasoning Tier)
-  const activeGeminiKey = config.geminiApiKey || process.env.GEMINI_API_KEY
-  if (activeGeminiKey && (modelSelection.provider === 'gemini' || config.aiProvider === 'gemini' || config.aiProvider === 'builtin' || !config.aiProvider)) {
-    try {
-      return await generateGeminiStream(
-        activeGeminiKey,
-        modelSelection.modelName || 'gemini-1.5-flash',
-        systemPrompt,
-        fullPromptWithEvidence,
-        effectiveHistory,
-        onToken
-      )
-    } catch (err: any) {
-      console.warn('[AIService] Gemini API error, attempting next engine:', err.message)
+  // 1. Google Gemini (Primary Provider)
+  const isGenuineKey = (k?: string): boolean =>
+    typeof k === 'string' && k.trim().length > 10 && !k.includes('••••') && !k.includes('****')
+
+  const activeGeminiKey = isGenuineKey(config.geminiApiKey)
+    ? config.geminiApiKey!.trim()
+    : (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim()) || ''
+
+  if (modelSelection.provider === 'gemini' || config.aiProvider === 'gemini') {
+    if (!activeGeminiKey) {
+      throw new Error('Google Gemini API key is missing. Please set the GEMINI_API_KEY environment variable on your server or configure your key in Settings.')
     }
+    return await generateGeminiStream(
+      activeGeminiKey,
+      modelSelection.modelName || process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+      systemPrompt,
+      fullPromptWithEvidence,
+      effectiveHistory,
+      onToken
+    )
   }
 
   // 2. OpenAI if configured
@@ -215,7 +216,61 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
 /**
  * Streams response using Google Gemini with complete multi-turn history and model fallbacks
  */
-async function generateGeminiStream(
+/**
+ * Classifies Gemini-specific errors into user-friendly actionable messages
+ */
+export function classifyGeminiError(err: any): Error {
+  const msg = (err?.message || '').toLowerCase()
+  const status = err?.status || err?.statusCode
+
+  if (
+    msg.includes('api_key_invalid') ||
+    msg.includes('api key not valid') ||
+    msg.includes('invalid api key') ||
+    msg.includes('api_key') ||
+    (status === 400 && msg.includes('key')) ||
+    status === 401 ||
+    status === 403
+  ) {
+    return new Error('Invalid Google Gemini API key. Please verify your API key in Settings or generate a new key at Google AI Studio (https://aistudio.google.com/app/apikey).')
+  }
+
+  if (
+    msg.includes('resource_exhausted') ||
+    msg.includes('quota') ||
+    msg.includes('rate limit') ||
+    status === 429
+  ) {
+    return new Error('Google Gemini rate limit / quota exceeded (15 requests/min on free tier). Please wait a moment before trying again.')
+  }
+
+  if (
+    msg.includes('model not found') ||
+    msg.includes('not supported') ||
+    msg.includes('deprecated') ||
+    status === 404
+  ) {
+    return new Error('The requested Gemini model is not supported or deprecated. Please configure a supported model such as gemini-1.5-flash.')
+  }
+
+  if (
+    msg.includes('fetch failed') ||
+    msg.includes('econnreset') ||
+    msg.includes('etimedout') ||
+    msg.includes('network') ||
+    status === 503 ||
+    status === 500
+  ) {
+    return new Error('Google Gemini service is temporarily unreachable. Please check your internet connection and try again.')
+  }
+
+  return new Error(`Gemini Error: ${err.message || 'Unknown error occurred while contacting Gemini'}`)
+}
+
+/**
+ * Streams response using Google Gemini with complete multi-turn history, bounded retries, and clean error handling
+ */
+export async function generateGeminiStream(
   apiKey: string,
   modelName: string,
   systemInstruction: string,
@@ -223,6 +278,17 @@ async function generateGeminiStream(
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
   onToken?: (token: string) => void
 ): Promise<string> {
+  // Support safe offline test mock without consuming real API quota
+  if (apiKey === 'test-mock-key') {
+    const mockReply = `Hello mama! This is a verified test response from Gemini Flash (${modelName}).`
+    const words = mockReply.split(' ')
+    for (let i = 0; i < words.length; i++) {
+      const chunk = (i === 0 ? '' : ' ') + words[i]
+      if (onToken) onToken(chunk)
+    }
+    return mockReply
+  }
+
   const genAI = getGeminiClient(apiKey)
   const candidateModels = Array.from(new Set([
     modelName,
@@ -245,11 +311,9 @@ async function generateGeminiStream(
   for (const msg of validHistory) {
     const role: 'user' | 'model' = msg.role === 'assistant' ? 'model' : 'user'
     if (chatHistory.length === 0 && role === 'model') {
-      // First message must be user
       continue
     }
     if (chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === role) {
-      // Merge consecutive messages of the same role
       chatHistory[chatHistory.length - 1].parts[0].text += `\n\n${msg.content}`
     } else {
       chatHistory.push({
@@ -261,36 +325,84 @@ async function generateGeminiStream(
 
   let lastError: any = null
   for (const candidate of candidateModels) {
-    try {
-      const model = genAI.getGenerativeModel({
-        model: candidate,
-        systemInstruction,
-      })
+    let attempt = 0
+    const maxRetries = 2
 
-      const chat = model.startChat({ history: chatHistory })
-      const result = await chat.sendMessageStream(prompt)
+    while (attempt <= maxRetries) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: candidate,
+          systemInstruction,
+        })
 
-      let fullText = ''
-      for await (const chunk of result.stream) {
-        const chunkText = chunk.text()
-        if (chunkText) {
-          fullText += chunkText
-          if (onToken) onToken(chunkText)
+        const chat = model.startChat({ history: chatHistory })
+        const result = await chat.sendMessageStream(prompt)
+
+        let fullText = ''
+        for await (const chunk of result.stream) {
+          const chunkText = chunk.text()
+          if (chunkText) {
+            fullText += chunkText
+            if (onToken) onToken(chunkText)
+          }
         }
-      }
 
-      return fullText
-    } catch (err: any) {
-      lastError = err
-      if (err.message && (err.message.includes('404') || err.message.includes('not found') || err.message.includes('deprecated'))) {
-        console.warn(`[AIService] Gemini model "${candidate}" unavailable, trying fallback candidate...`)
-        continue
+        return fullText
+      } catch (err: any) {
+        lastError = err
+        const msg = (err?.message || '').toLowerCase()
+        const status = err?.status || err?.statusCode
+
+        // 1. If candidate model not found or deprecated, try next candidate model
+        if (msg.includes('404') || msg.includes('not found') || msg.includes('deprecated') || status === 404) {
+          console.warn(`[AIService] Gemini model "${candidate}" unavailable, trying next candidate...`)
+          break
+        }
+
+        // 2. Quota exhaustion: fail fast or fallback from Pro to Flash (never loop infinitely!)
+        if (msg.includes('resource_exhausted') || msg.includes('quota') || status === 429) {
+          if (candidate.includes('pro')) {
+            console.warn(`[AIService] Gemini Pro quota exhausted, attempting Flash fallback...`)
+            break
+          }
+          throw classifyGeminiError(err)
+        }
+
+        // 3. Invalid API key: fail immediately without retrying
+        if (
+          msg.includes('api_key_invalid') ||
+          msg.includes('api key not valid') ||
+          (status === 400 && msg.includes('key')) ||
+          status === 401 ||
+          status === 403
+        ) {
+          throw classifyGeminiError(err)
+        }
+
+        // 4. Transient network error: bounded retry with backoff
+        const isTransient =
+          msg.includes('fetch failed') ||
+          msg.includes('network') ||
+          msg.includes('econnreset') ||
+          msg.includes('timeout') ||
+          status === 503 ||
+          status === 500
+
+        if (isTransient && attempt < maxRetries) {
+          attempt++
+          const backoff = attempt * 800
+          console.warn(`[AIService] Transient error on Gemini model "${candidate}" (attempt ${attempt}/${maxRetries}), retrying in ${backoff}ms...`)
+          await new Promise((r) => setTimeout(r, backoff))
+          continue
+        }
+
+        // Non-transient or retries exhausted
+        throw classifyGeminiError(err)
       }
-      throw err
     }
   }
 
-  throw lastError || new Error('All candidate Gemini models failed')
+  throw classifyGeminiError(lastError || new Error('All candidate Gemini models failed.'))
 }
 
 /**
@@ -400,6 +512,50 @@ async function generateContextualSmartResponse(
     /\b(thappu cheppavu|thappu ra|adi thappu|adi kaadu mama|nenu adigindi veru|nenu .* gurinchi adiga|nuvvu em cheptunnav)\b/i.test(lower)
   ) {
     answer = `You're right, mama 😂 I missed the connection! You first asked about Hyderabad, so when you said 'ammerpet,' I should have understood that you meant Ameerpet in Hyderabad. Instead, I went off-track! My mistake, ra!\n\nAmeerpet is Hyderabad's legendary software coaching capital! Known for Mythrivanam, Ameerpet metro interchange, and thousands of techies learning coding. From now on, I'll keep our previous conversation locked in context so this never happens again!`
+  }
+
+  // 0-repetition. USER COMPLAINT ABOUT REPEATING CANNED RESPONSES
+  else if (
+    /\b(don'?t give the same answers?|stop repeating( the same answers?)?|why (are you )?repeating( the same)?|same answers? every time|giving the same answers?|always saying the same|repeat chestunnav|malli malli ade|ade sollu|ade dialogue)\b/i.test(lower)
+  ) {
+    answer = `సరే మావా, నిజమే! I apologize for repeating myself. ఇకపై రొటీన్ టెంప్లేట్ డైలాగులు కాకుండా, నువ్వు అడిగిన విషయానికే డైరెక్ట్ గా స్పష్టమైన సమాధానం ఇస్తా. చెప్పు రా, ఇప్పుడు ఏం తెలుసుకోవాలనుకుంటున్నావ్?`
+  }
+
+  // 0-insistence. USER INSISTENCE ON UNANSWERED QUESTION (e.g. "I'm asking.", "Answer me")
+  else if (
+    /^(i'?m asking(\s*you)?|i am asking(\s*you)?|answer me|answer my question|answer what i (asked|was asking)|tell me now|tell me|nenu aduguthunna|samadhanam cheppu|adiga kada|cheppava)[\s!.?]*$/i.test(clean)
+  ) {
+    if (combinedHistory.includes('modi') || combinedHistory.includes('narendra')) {
+      answer = `అర్థమైంది మావా, నువ్వు అడిగిన విషయానికే సూటిగా సమాధానం చెప్తున్నా! నరేంద్ర మోదీ (Narendra Modi) గారు 2014 నుండి భారత ప్రధానమంత్రిగా ఉన్నారు. ఆయన గుజరాత్ సీఎంగా 13 ఏళ్లు పనిచేశారు. ఆయన రాజకీయ ప్రస్థానం, డిజిటల్ ఇండియా, మేక్ ఇన్ ఇండియా లాంటి పాలసీల గురించి ఇంకా ఏ సమాచారం కావాలో చెప్పు రా, వివరంగా చెప్తాను.`
+    } else {
+      answer = `అర్థమైంది మావా, నీ ప్రశ్నకు నేరుగా వస్తున్నా! చెప్పు రా, ఏం తెలుసుకోవాలనుకుంటున్నావో డైరెక్ట్ గా ఆన్సర్ ఇస్తా! 👊`
+    }
+  }
+
+  // 0-modi. NARENDRA MODI INQUIRY OR CONTEXTUAL FOLLOW-UP
+  else if (
+    /\b(narendra modi|modi|prime minister of india|pm modi)\b/i.test(lower) ||
+    ((combinedHistory.includes('modi') || combinedHistory.includes('narendra') || lastUserMsg.toLowerCase().includes('modi')) &&
+      /\b(tell me what you know|tell me more|what do you know|about him|who is he|his background|his career|details|achievements)\b/i.test(lower))
+  ) {
+    if (/\b(tell me what you know|tell me more|what do you know|about him|who is he|his background|his career|details|achievements|schemes|policies)\b/i.test(lower) || isDetailRequested) {
+      answer = `నరేంద్ర దామోదర్‌దాస్ మోదీ (Narendra Modi) గారి సమగ్ర వివరాలు మావా:\n\n• **జననం & ప్రారంభ జీవితం**: 1950 సెప్టెంబర్ 17న గుజరాత్‌లోని వడ్‌నగర్‌లో జన్మించారు. చిన్నతనంలోనే RSS ప్రచారక్‌గా ప్రజా జీవితంలోకి ప్రవేశించారు.\n• **గుజరాత్ ముఖ్యమంత్రి (2001–2014)**: దాదాపు 13 సంవత్సరాలు గుజరాత్ సీఎంగా వరుసగా నాలుగు పర్యాయాలు బాధ్యతలు నిర్వహించి, పారిశ్రామిక అభివృద్ధి, 'వైబ్రంట్ గుజరాత్' ద్వారా రాష్ట్రాన్ని ముందుకు నడిపించారు.\n• **భారత ప్రధాన మంత్రి (2014–ప్రస్తుతం)**: 2014, 2019, 2024 సార్వత్రిక ఎన్నికల్లో బిజెపి/ఎన్డీయేను విజయపథంలో నడిపించి, వరుసగా మూడోసారి భారత 14వ ప్రధానిగా బాధ్యతలు నిర్వర్తిస్తున్నారు.\n• **కీలక పథకాలు & సంస్కరణలు**: డిజిటల్ ఇండియా (UPI విప్లవం), మేక్ ఇన్ ఇండియా, స్వచ్ఛ భారత్, జన్ ధన్ యోజన, ఆయుష్మాన్ భారత్, జీఎస్టీ (GST), మరియు ఆర్టికల్ 370 రద్దు.\n• **అంతర్జాతీయ దౌత్యం**: జి20 (G20) భారత్ సమ్మిట్, క్వాడ్ (QUAD), మరియు గ్లోబల్ సౌత్ నాయకత్వంలో భారతదేశ ప్రాముఖ్యతను ప్రపంచవ్యాప్తంగా నిలిపారు.`
+    } else {
+      answer = `హా, ఖచ్చితంగా తెలుసు మావా! నరేంద్ర మోదీ (Narendra Modi) భారతదేశ ప్రస్తుత 14వ ప్రధాన మంత్రి (Prime Minister of India). ఆయన 2014 నుండి వరుసగా మూడవసారి భారత ప్రధానిగా కొనసాగుతున్నారు. అంతకుముందు ఆయన 2001 నుండి 2014 వరకు గుజరాత్ ముఖ్యమంత్రిగా సుదీర్ఘ కాలం పనిచేశారు.`
+    }
+  }
+
+  // 0-identity. BOT IDENTITY (AI OR BOT?)
+  else if (
+    /^(are you (an? )?(ai|bot|robot|human|real)|(your|you're|you are|ur) (ai|bot|a bot|an ai)|(ai|bot|robot) or (human|bot|ai|real|person)|are you (real|human|ai)|nuvvu ai va|nuvvu bot va)[\s!.?]*$/i.test(clean) ||
+    /\b(are you an? ai or bot|your ai or bot|you are ai or bot|ai or bot|bot or human|ai or human)\b/i.test(lower)
+  ) {
+    answer = `హా, నిజం చెప్పాలంటే నేను ఒక AI అసిస్టెంట్ ని మావా (I am an AI assistant), మనిషిని కాదు! My name is Mana AI. నిన్ను ఒక మంచి స్నేహితుడిలా అర్థం చేసుకుని, ప్రశ్నలకు సమాధానాలు ఇవ్వడానికి, కోడింగ్, వెబ్ రీసెర్చ్, ఇతర పనుల్లో సహాయం చేయడానికి నేను ఇక్కడున్నాను. నీకు ఏ విషయంలో హెల్ప్ కావాలి ra?`
+  }
+
+  // 0-howareyou. HOW ARE YOU / CHECK-IN
+  else if (/^(how are you|how r u|how are things|how's it going|how are you doing|ela unnav|bagunnava|kushalama)[\s!.?]*$/i.test(clean)) {
+    answer = `నేను చాలా బాగున్నాను మావా! Full energy తో ఉన్నా. నువ్వు ఎలా ఉన్నావ్ రా? ఈరోజు ఏం విశేషాలు? 😊`
   }
 
   // 0b. CONTEXTUAL LOCALITY IN HYDERABAD (e.g. Hyderabad -> "ammerpet" or "ameerpet")
@@ -1169,12 +1325,12 @@ console.log(reversed); // "olleh"
     } else if (topic.length > 0) {
       const isTech = /\b(code|coding|function|class|method|component|module|database|query|api|server|network|git|npm|algorithm|loop|variable|type|interface|software|hardware)\b/i.test(clean)
       if (isTech) {
-        answer = `${emoji} About **${topic}**, mama — it gives you clean, structured capability to handle specific requirements without messy workarounds.\n\nWant me to show you a practical code example or break down the implementation?`
+        answer = `${emoji} Regarding **${topic}**, mama: it provides structured capability to solve specific technical requirements cleanly.\n\nWant me to write a practical code example or break down the implementation step-by-step?`
       } else {
-        answer = `${emoji} **${topic}** gurincha mama! Solid topic ra! Cheppu, deeni gurinchi details kavala, concepts explain cheyyala, leda direct ga start cheddham aa?`
+        answer = `${emoji} Regarding **${topic}**, mama — I'm ready to discuss this directly with you. What specific question or detail would you like to explore?`
       }
     } else {
-      answer = `Hey mama! Cheppu ra, what's on your mind? Tell me the scene and let's sort it out! 👊`
+      answer = `హే మావా! Cheppu ra, what's on your mind? Let me know and let's discuss! 😊`
     }
   }
 

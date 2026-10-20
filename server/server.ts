@@ -15,6 +15,7 @@ import { generateAIImage } from './services/imageService.js'
 import { startVideoJob, getVideoJob, syncAndGetVideoJob, PROVIDER_RESTRICTIONS } from './services/videoService.js'
 import { documentService } from './services/documentService.js'
 import { executeTool, AVAILABLE_TOOLS } from './services/toolService.js'
+import { orchestrateChat } from './services/chatOrchestrator.js'
 import { SearchEvidence } from './types.js'
 
 const app = express()
@@ -73,6 +74,15 @@ const apiLimiter = rateLimit({
   message: { error: 'Too many requests. Please wait a moment before sending another query.' },
 })
 app.use('/api/', apiLimiter)
+
+// Per-IP Chat Limiter: 40 queries per minute to protect API quota
+const chatLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many chat requests. Please wait a moment before sending another query.' },
+})
 
 // Helper to extract active user from Authorization header
 function getAuthUser(req: express.Request) {
@@ -202,6 +212,10 @@ app.post('/api/chats/:id/messages', async (req, res) => {
     return
   }
   const session = await chatHistoryService.saveMessagesAsync(userId, req.params.id, messages)
+  if (!session) {
+    res.status(403).json({ error: 'Unauthorized to modify this conversation session' })
+    return
+  }
   res.json({ success: true, session })
 })
 
@@ -253,7 +267,7 @@ app.get('/api/test-blobs', async (_req, res) => {
     await blobsStore.delete(testKey)
     res.json({ success: true, written: testData, readBack })
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message, stack: err.stack })
+    res.status(500).json({ success: false, error: err.message })
   }
 })
 
@@ -483,18 +497,29 @@ app.post('/api/search', async (req, res) => {
 /**
  * Streaming Chat Endpoint using Server-Sent Events (SSE)
  */
-app.post('/api/chat/stream', async (req, res) => {
-  const { prompt, history = [], searchMode: reqSearchMode, reasoningMode: reqReasoningMode } = req.body
+app.post('/api/chat/stream', chatLimiter, async (req, res) => {
+  const {
+    prompt,
+    history = [],
+    searchMode,
+    reasoningMode,
+    aiProvider,
+    modelName,
+    geminiApiKey,
+    openaiApiKey,
+    groqApiKey,
+  } = req.body
 
-  if (!prompt || typeof prompt !== 'string') {
+  if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
     res.status(400).json({ error: 'Valid prompt string is required' })
     return
   }
 
   // Setup SSE Headers
-  res.setHeader('Content-Type', 'text/event-stream')
-  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+  res.setHeader('Cache-Control', 'no-cache, no-transform')
   res.setHeader('Connection', 'keep-alive')
+  res.setHeader('X-Accel-Buffering', 'no')
   res.flushHeaders?.()
 
   const sendEvent = (event: string, data: any) => {
@@ -502,116 +527,36 @@ app.post('/api/chat/stream', async (req, res) => {
   }
 
   const authUser = getAuthUser(req)
-  const config = configService.getConfig()
-  if (authUser?.geminiApiKey && !config.geminiApiKey) {
-    config.geminiApiKey = authUser.geminiApiKey
-  }
-  const searchMode = reqSearchMode || config.searchMode || 'auto'
-  const reasoningMode = reqReasoningMode || config.reasoningMode || 'fast'
-  const isMemoryEnabled = config.memoryEnabled !== false
-
-  // Step 1: Detect and save user preferences/learnings automatically if memory is enabled
-  const learnedMemory = memoryService.detectAndSaveUserPreferences(prompt, isMemoryEnabled)
-  if (learnedMemory) {
-    sendEvent('memory_saved', learnedMemory)
-  }
-
-  // Retrieve relevant user memories to personalize the answer
-  const relevantMemories = memoryService.getRelevantMemories(prompt, isMemoryEnabled)
-
-  // Retrieve relevant user knowledge documents (RAG)
-  const documentMatches = documentService.searchKnowledge(prompt, 3)
-
-  // Step 2: Intent classification with conversational context
-  const intent = classifyIntent(prompt, history)
-  const shouldSearch =
-    searchMode !== 'never' &&
-    !intent.isCorrectionOrFeedback &&
-    intent.category !== 'conversational' &&
-    ((searchMode === 'always' && intent.category !== 'contextual_followup') ||
-     (searchMode === 'auto' && intent.needsSearch))
-
-  let searchEvidence: SearchEvidence | undefined
 
   try {
-    if (shouldSearch) {
-      sendEvent('search_start', {
-        query: intent.refinedQuery,
-        reason: intent.reason,
-        category: intent.category,
-      })
-
-      sendEvent('search_status', {
-        status: `Searching live web via ${config.searchProvider}...`,
-        step: 'retrieving',
-      })
-
-      searchEvidence = await executeWebSearch(
-        intent.refinedQuery,
-        config.searchProvider,
-        {
-          tavily: config.tavilyApiKey,
-          serper: config.serperApiKey,
-          brave: config.braveApiKey,
-        }
-      )
-
-      sendEvent('search_status', {
-        status: 'Filtering & verifying sources...',
-        step: 'filtering',
-      })
-
-      sendEvent('search_results', searchEvidence)
-    }
-
-    sendEvent('search_status', {
-      status: reasoningMode === 'thinking' ? 'Deep reasoning & calculating...' : 'Thinking...',
-      step: 'generating',
-    })
-
-    // Step 3: Stream AI response with full multi-turn history, memories, reasoning, & documents
-    const streamStart = Date.now()
-    let firstTokenTime: number | null = null
-    let accumulatedContent = ''
-
-    await generateAIResponse({
-      prompt,
-      history,
-      searchEvidence,
-      memories: relevantMemories,
-      isDetailRequested: intent.isDetailRequested,
-      config,
-      reasoningMode,
-      documentMatches,
-      onToken: (token: string) => {
-        if (!firstTokenTime) {
-          firstTokenTime = Date.now() - streamStart
-        }
-        accumulatedContent += token
-        sendEvent('token', { token })
+    await orchestrateChat(
+      {
+        prompt,
+        history,
+        searchMode,
+        reasoningMode,
+        aiProvider,
+        modelName,
+        geminiApiKey,
+        openaiApiKey,
+        groqApiKey,
+        authUser,
+        clientId: getClientId(req),
       },
-    })
-
-    const totalDuration = Date.now() - streamStart
-
-    // Step 4: Complete event with timing stats
-    sendEvent('done', {
-      content: accumulatedContent,
-      searchEvidence,
-      isSearchPerformed: shouldSearch || !!searchEvidence,
-      intent,
-      memoriesUsed: relevantMemories.map((m) => m.key),
-      documentsUsed: documentMatches.map((d) => d.docTitle),
-      reasoningMode,
-      timings: {
-        ttftMs: firstTokenTime || totalDuration,
-        totalMs: totalDuration,
-      },
-    })
-
-    res.end()
+      {
+        onMemorySaved: (memory) => sendEvent('memory_saved', memory),
+        onSearchStart: (data) => sendEvent('search_start', data),
+        onSearchStatus: (data) => sendEvent('search_status', data),
+        onSearchResults: (evidence) => sendEvent('search_results', evidence),
+        onToken: (token) => sendEvent('token', { token }),
+        onDone: (data) => {
+          sendEvent('done', data)
+          res.end()
+        },
+      }
+    )
   } catch (err: any) {
-    console.error('[Server] Chat stream error:', err)
+    console.error('[Server] Chat stream error:', err.message)
     sendEvent('error', {
       message: err.message || 'An error occurred during response generation.',
     })
@@ -622,68 +567,45 @@ app.post('/api/chat/stream', async (req, res) => {
 /**
  * Standard Non-streaming Chat Endpoint
  */
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', chatLimiter, async (req, res) => {
   try {
-    const { prompt, history = [], searchMode: reqSearchMode, reasoningMode: reqReasoningMode } = req.body
-    if (!prompt) {
+    const {
+      prompt,
+      history = [],
+      searchMode,
+      reasoningMode,
+      aiProvider,
+      modelName,
+      geminiApiKey,
+      openaiApiKey,
+      groqApiKey,
+    } = req.body
+    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
       res.status(400).json({ error: 'Prompt is required' })
       return
     }
 
-    const config = configService.getConfig()
-    const searchMode = reqSearchMode || config.searchMode || 'auto'
-    const reasoningMode = reqReasoningMode || config.reasoningMode || 'fast'
-    const isMemoryEnabled = config.memoryEnabled !== false
-
-    memoryService.detectAndSaveUserPreferences(prompt, isMemoryEnabled)
-    const relevantMemories = memoryService.getRelevantMemories(prompt, isMemoryEnabled)
-    const documentMatches = documentService.searchKnowledge(prompt, 3)
-
-    const intent = classifyIntent(prompt, history)
-    const shouldSearch =
-      searchMode !== 'never' &&
-      !intent.isCorrectionOrFeedback &&
-      intent.category !== 'conversational' &&
-      ((searchMode === 'always' && intent.category !== 'contextual_followup') ||
-       (searchMode === 'auto' && intent.needsSearch))
-
-    let searchEvidence: SearchEvidence | undefined
-
-    if (shouldSearch) {
-      searchEvidence = await executeWebSearch(
-        intent.refinedQuery,
-        config.searchProvider,
-        {
-          tavily: config.tavilyApiKey,
-          serper: config.serperApiKey,
-          brave: config.braveApiKey,
-        }
-      )
-    }
-
-    const content = await generateAIResponse({
+    const authUser = getAuthUser(req)
+    const result = await orchestrateChat({
       prompt,
       history,
-      searchEvidence,
-      memories: relevantMemories,
-      isDetailRequested: intent.isDetailRequested,
-      config,
+      searchMode,
       reasoningMode,
-      documentMatches,
+      aiProvider,
+      modelName,
+      geminiApiKey,
+      openaiApiKey,
+      groqApiKey,
+      authUser,
+      clientId: getClientId(req),
     })
 
     res.json({
       success: true,
-      content,
-      searchEvidence,
-      isSearchPerformed: shouldSearch || !!searchEvidence,
-      intent,
-      memoriesUsed: relevantMemories.map((m) => m.key),
-      documentsUsed: documentMatches.map((d) => d.docTitle),
-      reasoningMode,
+      ...result,
     })
   } catch (err: any) {
-    console.error('[Server] Chat error:', err)
+    console.error('[Server] Chat error:', err.message)
     res.status(500).json({ error: err.message })
   }
 })

@@ -7,6 +7,21 @@
     <meta name="theme-color" content="#ffffff" />
     <meta name="description" content="Mana AI — Your AI. Your World. Personal AI friend with continuous improvement, memory, and intelligent web search." />
     <title>Mana AI — Your AI. Your World.</title>
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('mana_theme') || 'system';
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (saved === 'dark' || (saved === 'system' && prefersDark)) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.setAttribute('data-theme', 'light');
+            document.documentElement.classList.remove('dark');
+          }
+        } catch(e) {}
+      })();
+    </script>
     <!-- Modern Typography: Plus Jakarta Sans & JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

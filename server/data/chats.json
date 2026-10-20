@@ -1,5 +1,125 @@
 [
   {
+    "id": "session-1792494630537-o0xn",
+    "userId": "user-alpha",
+    "title": "User A Secret Chat",
+    "createdAt": "2026-10-20T11:10:30.537Z",
+    "updatedAt": "2026-10-20T11:10:30.547Z",
+    "messages": [
+      {
+        "id": "m1",
+        "role": "user",
+        "content": "Secret Alpha",
+        "timestamp": 1792494630547
+      }
+    ]
+  },
+  {
+    "id": "session-1792494515086-z17l",
+    "userId": "user-alpha",
+    "title": "User A Secret Chat",
+    "createdAt": "2026-10-20T11:08:35.086Z",
+    "updatedAt": "2026-10-20T11:08:35.093Z",
+    "messages": [
+      {
+        "id": "m1",
+        "role": "user",
+        "content": "Secret Alpha",
+        "timestamp": 1792494515093
+      }
+    ]
+  },
+  {
+    "id": "session-1792494487740-qe8c",
+    "userId": "user-alpha",
+    "title": "User A Secret Chat",
+    "createdAt": "2026-10-20T11:08:07.740Z",
+    "updatedAt": "2026-10-20T11:08:07.747Z",
+    "messages": [
+      {
+        "id": "m1",
+        "role": "user",
+        "content": "Secret Alpha",
+        "timestamp": 1792494487747
+      }
+    ]
+  },
+  {
+    "id": "session-1792494455584-piw1",
+    "userId": "user-alpha",
+    "title": "User A Secret Chat",
+    "createdAt": "2026-10-20T11:07:35.584Z",
+    "updatedAt": "2026-10-20T11:07:35.592Z",
+    "messages": [
+      {
+        "id": "m1",
+        "role": "user",
+        "content": "Secret Alpha",
+        "timestamp": 1792494455592
+      }
+    ]
+  },
+  {
+    "id": "session-1792494280818-n129",
+    "userId": "user-alpha",
+    "title": "User A Secret Chat",
+    "createdAt": "2026-10-20T11:04:40.818Z",
+    "updatedAt": "2026-10-20T11:04:40.828Z",
+    "messages": [
+      {
+        "id": "m1",
+        "role": "user",
+        "content": "Secret Alpha",
+        "timestamp": 1792494280827
+      }
+    ]
+  },
+  {
+    "id": "session-1792493746566-kpy5",
+    "userId": "user-alpha",
+    "title": "User A Secret Chat",
+    "createdAt": "2026-10-20T10:55:46.566Z",
+    "updatedAt": "2026-10-20T10:55:46.573Z",
+    "messages": [
+      {
+        "id": "m1",
+        "role": "user",
+        "content": "Secret Alpha",
+        "timestamp": 1792493746573
+      }
+    ]
+  },
+  {
+    "id": "session-1792493720555-chel",
+    "userId": "user-alpha",
+    "title": "User A Secret Chat",
+    "createdAt": "2026-10-20T10:55:20.555Z",
+    "updatedAt": "2026-10-20T10:55:20.563Z",
+    "messages": [
+      {
+        "id": "m1",
+        "role": "user",
+        "content": "Secret Alpha",
+        "timestamp": 1792493720563
+      }
+    ]
+  },
+  {
+    "id": "session-1792493681375-l0xj",
+    "userId": "user-alpha",
+    "title": "User A Secret Chat",
+    "createdAt": "2026-10-20T10:54:41.375Z",
+    "updatedAt": "2026-10-20T10:54:41.384Z",
+    "messages": [
+      {
+        "id": "m1",
+        "role": "user",
+        "content": "Secret Alpha",
+        "timestamp": 1792493681384
+      }
+    ]
+  },
+  {
     "id": "session-1792475453233-0gmf",
     "userId": "guest:g-1792474209406-ho6tfm",
     "title": "hi",

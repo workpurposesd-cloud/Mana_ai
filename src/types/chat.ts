@@ -170,4 +170,5 @@ export interface AppConfig {
   reasoningMode?: 'fast' | 'thinking'
   memoryEnabled?: boolean
   voiceSettings?: VoiceSettings
+  theme?: 'system' | 'light' | 'dark'
 }

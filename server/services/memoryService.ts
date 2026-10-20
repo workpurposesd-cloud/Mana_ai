@@ -175,10 +175,22 @@ class MemoryService {
     if (!enabled) return null
     const clean = prompt.trim()
 
-    // 1. Name detection
-    const nameMatch = clean.match(/(?:my name is|call me|i am|i'm)\s+([A-Z][a-zA-Z0-9_-]+)/i)
-    if (nameMatch && !/^(sorry|glad|happy|tired|here|fine|good|ready)/i.test(nameMatch[1])) {
-      return this.addMemory('personal', "User's Name", nameMatch[1])
+    // 1. Name detection (e.g. "my name is Rahul", "call me Nagesh")
+    const explicitNameMatch = clean.match(/(?:my name is|call me|myself|i am called|i'm called)\s+([A-Z][a-zA-Z0-9_-]+)/i)
+    const selfNameMatch = !explicitNameMatch && clean.match(/^(?:i am|i'm)\s+([A-Z][a-zA-Z0-9_-]+)[.!]?$/i)
+    const candidate = explicitNameMatch ? explicitNameMatch[1] : (selfNameMatch ? selfNameMatch[1] : null)
+
+    if (candidate) {
+      const lowerCandidate = candidate.toLowerCase()
+      const nonNameWords = new Set([
+        'sorry', 'glad', 'happy', 'tired', 'here', 'fine', 'good', 'ready',
+        'asking', 'bored', 'sad', 'sick', 'sure', 'not', 'just', 'working',
+        'trying', 'saying', 'telling', 'looking', 'waiting', 'reading',
+        'learning', 'testing', 'using', 'online', 'busy', 'done', 'back'
+      ])
+      if (!nonNameWords.has(lowerCandidate) && !/(?:ing|ed|ly)$/i.test(lowerCandidate)) {
+        return this.addMemory('personal', "User's Name", candidate)
+      }
     }
 
     // 2. Preferences

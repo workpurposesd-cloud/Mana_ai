@@ -162,7 +162,16 @@ function extractActiveTopic(turns: ContextualTurn[]): {
   if (/\b(mumbai|bombay|maharashtra)\b/i.test(combinedText)) {
     return { city: 'mumbai', cityName: 'Mumbai', generalTopic: 'Mumbai' }
   }
-  if (/\b(amaravati|vijayawada|vizag|visakhapatnam|tirupati|guntur|andhra|ap)\b/i.test(combinedText)) {
+  if (/\b(vizag|visakhapatnam)\b/i.test(combinedText)) {
+    return { city: 'ap', cityName: 'Visakhapatnam (Vizag)', generalTopic: 'Vizag' }
+  }
+  if (/\b(vijayawada|bezawada)\b/i.test(combinedText)) {
+    return { city: 'ap', cityName: 'Vijayawada', generalTopic: 'Vijayawada' }
+  }
+  if (/\b(tirupati|tirumala)\b/i.test(combinedText)) {
+    return { city: 'ap', cityName: 'Tirupati', generalTopic: 'Tirupati' }
+  }
+  if (/\b(amaravati|guntur|andhra|ap)\b/i.test(combinedText)) {
     return { city: 'ap', cityName: 'Andhra Pradesh', generalTopic: 'Andhra Pradesh' }
   }
 
@@ -175,6 +184,25 @@ function extractActiveTopic(turns: ContextualTurn[]): {
   }
   if (/\b(react|reactjs|hooks|jsx|redux|next\.?js|vue|angular)\b/i.test(combinedText)) {
     return { techDomain: 'react', techName: 'React / Frontend', generalTopic: 'React Web Development' }
+  }
+
+  // 3. Fallback: Extract entity/subject from recent user inquiries (e.g. "do you know Vizag", "tell me about Charminar", "do you know Narendra Modi")
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i]
+    if (turn.role === 'user') {
+      const cleanContent = turn.content.trim()
+      // Ignore meta-feedback or frustration turns
+      if (/^(don'?t give|stop repeating|why are you repeating|i'?m asking|answer me|hi|hello|how are you|how r u|your ai or bot)/i.test(cleanContent)) {
+        continue
+      }
+      const match = cleanContent.match(/\b(?:do you know|tell me what you know about|what do you know about|tell me about|who is|who was|who are|what is|what about|about|know about|info on|explain)\s+([a-zA-Z0-9\s#+._-]{2,50})/i)
+      if (match && match[1]) {
+        const extracted = match[1].trim().replace(/[?!.]+$/, '')
+        if (extracted && extracted.length > 2 && !/^(it|this|that|them|me|you|him|her)$/i.test(extracted)) {
+          return { generalTopic: extracted }
+        }
+      }
+    }
   }
 
   return {}
@@ -215,6 +243,8 @@ export function classifyIntent(
   // When the user points out a mistake, misunderstanding, or failure in the previous turn
   const correctionTriggers = [
     /\b(you made a mistake|you made a blunder|you are wrong|that is wrong|that's wrong|thats wrong)\b/i,
+    /\b(you('?re| are) giving wrong (answers?|info|information)|your answers? (is|are) wrong|wrong answers?|incorrect answers?|you don'?t know anything|answer is wrong|this is wrong|completely wrong|false answer|not correct)\b/i,
+    /\b(don'?t give the same answers?|stop repeating( the same answers?)?|why (are you )?repeating( the same)?|same answers? every time|giving the same answers?|always saying the same|repeat chestunnav|malli malli ade|ade sollu|ade dialogue)\b/i,
     /\b(rectify (your|you) mistakes?|need to rectify|correct (your|you) mistakes?|fix your mistake)\b/i,
     /\b(that('?s| is) not what (i|we) (asked|meant|said)|not what i was asking)\b/i,
     /\b(you misunderstood|you misunderstood me|you completely misunderstood|missed the context|missed the connection)\b/i,
@@ -239,6 +269,22 @@ export function classifyIntent(
     }
   }
 
+  // 2B. USER INSISTENCE & UNRESOLVED QUESTION (e.g. "I'm asking.", "Answer me", "Tell me now")
+  const insistenceRegex = /^(i'?m asking(\s*you)?|i am asking(\s*you)?|answer me|answer my question|answer what i (asked|was asking)|tell me now|tell me|nenu aduguthunna|samadhanam cheppu|adiga kada|cheppava)[\s!.?]*$/i
+  if (insistenceRegex.test(lower)) {
+    const targetTopic = activeTopic.generalTopic || activeTopic.cityName || activeTopic.techName || 'previous inquiry'
+    return {
+      needsSearch: false,
+      refinedQuery: targetTopic,
+      reason: `User is insisting on an answer to their unresolved question regarding "${targetTopic}".`,
+      category: 'clarification',
+      isDetailRequested,
+      isCorrectionOrFeedback: true,
+      contextualTopic: targetTopic,
+      originalQuery: cleanText,
+    }
+  }
+
   // 3. EXPLICIT TOPIC CHANGE
   // User explicitly asks to drop the old topic and start something new
   const topicChangeRegex = /^(forget that|leave that|ignore (that|previous)|switch topic|new (topic|question)|different topic|moving on|let'?s talk about something else|never mind|anyway)\b/i
@@ -254,15 +300,31 @@ export function classifyIntent(
     }
   }
 
-  // 4. CONVERSATIONAL GREETINGS & CASUAL OPENERS
+  // 4A. BOT IDENTITY, ORIGIN & CAPABILITIES (NEVER SEARCH WEB)
+  const identityRegex = /^(what('?s| is) your name|tell me your name|your name|who are you|who r u|who created you|who made you|who developed you|who built you|what can you do|what are your capabilities|what are your features|how can you help me|what is mana ai|who is mana ai|tell me about yourself|introduce yourself|nee peru enti|ni peru enti|nuvvu evaru|ninnu evaru chesaru|neeku emi vachu|are you (an? )?(ai|bot|robot|human|real)|(your|you're|you are|ur) (ai|bot|a bot|an ai)|(ai|bot|robot) or (human|bot|ai|real|person)|are you (real|human|ai)|nuvvu ai va|nuvvu bot va)[\s!.?]*$/i
+  if (identityRegex.test(cleanText) || identityRegex.test(lower)) {
+    return {
+      needsSearch: false,
+      refinedQuery: cleanText,
+      reason: 'Bot identity, capabilities, or self-referential inquiry answered directly from system persona.',
+      category: 'conversational',
+      isDetailRequested: false,
+      isFollowUp: false,
+      originalQuery: cleanText,
+    }
+  }
+
+  // 4B. CONVERSATIONAL GREETINGS & CASUAL OPENERS
   // Greetings, pleasantries, "tell me something", everyday banter
-  const conversationalRegex = /^(hi|hello|hey|greetings|good (morning|afternoon|evening)|bye|goodbye|bye bye|byee+|see you|see ya|take care|good night|gn|ok|okay|cool|nice|great|awesome|sounds good|got it|sure|alright|fine|thanks|thank you|thx|namaste|namaskaram|alvida|selavu|orey|mama|ra|enti ra|cheppu|em scene|em sangathi|bavunnava|ela unnav|bro|dude|wassup|what's up|whats up|sup)[\s!.?]*$/i
+  const conversationalRegex = /^(hi|hello|hey|greetings|namaste|namaskaram|how are you|how are you doing|how r u|how do you do|how's it going|how are things|ela unnav|ela unnaru|bagunnava|bavunnava|kushalama|good (morning|afternoon|evening)|bye|goodbye|bye bye|byee+|see you|see ya|take care|good night|gn)(\s+(bro|dude|mama|ra|bawa|babu|friend|there|all|everyone))?[\s!.?]*$/i
+  const conversationalStandaloneRegex = /^(ok|okay|cool|nice|great|awesome|sounds good|got it|sure|alright|fine|thanks|thank you|thx|alvida|selavu|orey|mama|ra|enti ra|cheppu|em scene|em sangathi|bavunnava|ela unnav|bro|dude|wassup|what's up|whats up|sup)[\s!.?]*$/i
   const tellMeSomethingRegex = /^(tell me something|tell me a fact|tell me something interesting|say something|tell me a story|say something interesting|something interesting|tell me an interesting fact)[\s!.?]*$/i
   const teluguCasualRegex = /\b(nenu inka bathike unna|inka bathike unna|bathike unna|em chestunnav|ela unnav|bavunnava|bagunnava|thinnava|tinnava|bore kodutondi|chala bore|bore mama|nidra vastondi|cheppu mama|cheppu ra|orey mama|visugu vastondi|mood off)\b/i
   const isReaction = /^(haha+|lmao+|lol+|rofl+|hehe+|😂|🤣|👍|❤️|🔥|cool|nice|great|super|awesome|chill|done|perfect|wow|ayyo|sare)[\s!.?]*$/i.test(cleanText)
 
   if (
     conversationalRegex.test(cleanText) ||
+    conversationalStandaloneRegex.test(cleanText) ||
     tellMeSomethingRegex.test(lower) ||
     teluguCasualRegex.test(lower) ||
     isReaction
@@ -296,7 +358,9 @@ export function classifyIntent(
   const words = cleanText.split(/\s+/).filter(Boolean)
   const isShortPrompt = words.length <= 5
   const hasTimeKeywords = /\b(latest|today|now|current|recent|recently|live|score|scores|timings?|schedule|price|prices|release date|version|2025|2026|newest|breaking)\b/i.test(lower)
-  const hasExplicitSearchWord = /\b(search (google|the web|online|for)|google (for|the|it|search)|look up (online|on the web|on google)|find (online|on the web))\b/i.test(lower)
+  const hasExplicitSearchWord =
+    /^search\b/i.test(lower) ||
+    /\b(search (google|the web|online|for|the latest|news|about)|google (for|the|it|search)|look up (online|on the web|on google)|find (online|on the web))\b/i.test(lower)
 
   if (turns.length > 0 && !hasExplicitSearchWord) {
     // 5A. Locality follow-up in city context (e.g. Hyderabad -> "ammerpet" or "ammerpet metro timings today")
@@ -427,13 +491,18 @@ export function classifyIntent(
       }
     }
 
-    // 5D. Short question follow-ups inheriting active topic: "how much", "nearby", "tell me more", "in Telugu", "why"
-    const genericFollowupRegex = /^(how much|how to reach|nearby|near by|what next|tell me more|in telugu|why|why so|how come|and you|mari nuvvu|what about you|is it good|is it safe|food|cost|rent)[\s?!.]*$/i
-    if (genericFollowupRegex.test(cleanText) || (isShortPrompt && !hasTimeKeywords)) {
+    // 5D. Short question follow-ups inheriting active topic: "how much", "nearby", "tell me more", "in Telugu", "why", "tell me what you know about him"
+    const genericFollowupRegex = /^(how much|how to reach( there)?|nearby|near by|what next|tell me more( about (it|this|that|them|him|her)?)?|tell me what you know( about (it|this|that|them|him|her)?)?|what do you know( about (it|this|that|them|him|her)?)?|in telugu|why|why so|how come|and you|mari nuvvu|what about you|is it good|is it safe|food|cost|rent|what about (its|the|his|her) (cost|price|history|culture|places|weather|safety|food|career|background|life)|explain (that|it|this) again|what else|give me more details)[\s?!.]*$/i
+    const isExplicitEntityQuestion = /^(do you know|what('?s| is)|who (was|is)|define|explain)\b/i.test(cleanText) && !/\b(it|its|this|that|them|there|him|her)\b/i.test(cleanText)
+    if ((genericFollowupRegex.test(cleanText) || (isShortPrompt && !hasTimeKeywords)) && !isExplicitEntityQuestion) {
+      let refined = cleanText
+      if (activeTopic.generalTopic && /\b(it|its|that|there|this|them|him|her|he|she)\b/i.test(cleanText)) {
+        refined = cleanText.replace(/\b(it|its|that place|that city|that thing|that|him|her|this person|this leader|ayana|athanu|aame)\b/gi, activeTopic.generalTopic)
+      }
       return {
         needsSearch: false,
-        refinedQuery: cleanText,
-        reason: 'Short contextual follow-up continuing ongoing topic without requiring web search.',
+        refinedQuery: refined,
+        reason: `Contextual follow-up continuing ongoing topic (${activeTopic.generalTopic || 'active context'}) without requiring web search.`,
         category: 'contextual_followup',
         isDetailRequested,
         isFollowUp: true,
@@ -505,7 +574,7 @@ export function classifyIntent(
   }
 
   // 7D. Breaking news & today's headlines
-  const newsRegex = /\b(breaking news today|today's headlines|latest news on|news today about|what happened today in)\b/i
+  const newsRegex = /\b(breaking news( today)?|today's headlines|latest news (on|about|of|regarding)|news today (about|on)|what happened today in)\b/i
   if (newsRegex.test(lower)) {
     return {
       needsSearch: true,
@@ -532,7 +601,7 @@ export function classifyIntent(
 
   // 8. General Knowledge Exclusions (e.g. "Do you know Hyderabad?", "What is RAM?", "Write code in Python")
   // Should answer directly from model's internal intelligence without web search
-  const generalKnowledgeRegex = /^(do you know|what is|tell me about|explain|who was|who is|history of|define|how does|why do|difference between)\s+[a-z0-9\s#+._-]+$/i
+  const generalKnowledgeRegex = /^(do you know|what('?s| is)|tell me about|explain|who was|who is|history of|define|how does|why do|difference between)\s+[a-z0-9\s#+._,'"-]+[?!.]*$/i
   if (!hasTimeKeywords && generalKnowledgeRegex.test(lower)) {
     return {
       needsSearch: false,

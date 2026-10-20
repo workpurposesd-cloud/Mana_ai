@@ -80,8 +80,12 @@ export class ConfigService {
       console.warn('[ConfigService] Could not load saved config from disk:', e)
     }
 
+    const envProvider = (process.env.AI_PROVIDER || process.env.DEFAULT_AI_PROVIDER || 'gemini') as any
+    const envModel = process.env.GEMINI_MODEL || process.env.MODEL_NAME || 'gemini-1.5-flash'
+    const defaultAiProvider = (process.env.GEMINI_API_KEY ? 'gemini' : envProvider) || 'gemini'
+
     this.config = {
-      aiProvider: (process.env.DEFAULT_AI_PROVIDER as any) || 'builtin',
+      aiProvider: defaultAiProvider,
       searchProvider: (process.env.DEFAULT_SEARCH_PROVIDER as any) || 'duckduckgo',
       searchMode: 'auto',
       geminiApiKey: process.env.GEMINI_API_KEY || '',
@@ -95,7 +99,7 @@ export class ConfigService {
       runwayApiKey: process.env.RUNWAY_API_KEY || '',
       imageProvider: 'openai',
       videoProvider: 'luma',
-      modelName: process.env.MODEL_NAME || 'gemini-1.5-flash',
+      modelName: envModel,
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       maxShortSentences: 4,
       emojiDensity: 'concise',
@@ -130,12 +134,12 @@ export class ConfigService {
 
     const sanitizedPartial: Partial<AppConfig> = { ...partial }
 
-    // Preserve existing real secret keys if incoming key is masked or untouched
+    // Preserve existing real secret keys if incoming key is masked
     for (const field of keyFields) {
       const incomingVal = sanitizedPartial[field]
       if (typeof incomingVal === 'string') {
         const trimmed = incomingVal.trim()
-        if (!trimmed || trimmed.includes('••••') || trimmed.includes('****')) {
+        if (trimmed.includes('••••') || trimmed.includes('****')) {
           delete sanitizedPartial[field]
         }
       }
@@ -157,19 +161,20 @@ export class ConfigService {
 
   public getMaskedConfig(): AppConfig {
     const c = this.getConfig()
+    // Zero secret leakage: all server secret API keys are strictly blanked out for client responses
     return {
       ...c,
-      geminiApiKey: c.geminiApiKey ? maskKey(c.geminiApiKey) : '',
-      openaiApiKey: c.openaiApiKey ? maskKey(c.openaiApiKey) : '',
-      groqApiKey: c.groqApiKey ? maskKey(c.groqApiKey) : '',
-      huggingfaceApiKey: c.huggingfaceApiKey ? maskKey(c.huggingfaceApiKey) : '',
-      tavilyApiKey: c.tavilyApiKey ? maskKey(c.tavilyApiKey) : '',
-      serperApiKey: c.serperApiKey ? maskKey(c.serperApiKey) : '',
-      braveApiKey: c.braveApiKey ? maskKey(c.braveApiKey) : '',
-      lumaApiKey: c.lumaApiKey ? maskKey(c.lumaApiKey) : '',
-      replicateApiKey: c.replicateApiKey ? maskKey(c.replicateApiKey) : '',
-      runwayApiKey: c.runwayApiKey ? maskKey(c.runwayApiKey) : '',
-      supabaseAnonKey: c.supabaseAnonKey ? maskKey(c.supabaseAnonKey) : '',
+      geminiApiKey: '',
+      openaiApiKey: '',
+      groqApiKey: '',
+      huggingfaceApiKey: '',
+      tavilyApiKey: '',
+      serperApiKey: '',
+      braveApiKey: '',
+      lumaApiKey: '',
+      replicateApiKey: '',
+      runwayApiKey: '',
+      supabaseAnonKey: '',
     }
   }
 }

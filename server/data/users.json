@@ -3,7 +3,7 @@
     "id": "user-default-1",
     "name": "U Nagesh",
     "email": "nagesh@mana.ai",
-    "passwordHash": "f23c1068670fb678e65c644b9ed67d6b2f133743d6d9165c071e089f34ae4007",
+    "passwordHash": "scrypt:d92438c6c76ccc9d50197cda1034f416:f1be498b24371379edb3e2ee2971cb4d3be15fc55960d8437f8a033f211951a213c6aa3d11eeb37bf70894816ffe9b108487245d2a510c2213ca56572f702ef3",
     "createdAt": "2026-10-19T12:52:01.725Z"
   },
   {

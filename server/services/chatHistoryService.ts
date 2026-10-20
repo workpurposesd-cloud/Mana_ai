@@ -110,17 +110,23 @@ class ChatHistoryService {
     return session
   }
 
-  public saveMessages(userId: string, sessionId: string, messages: ChatMessage[]): ChatSession {
+  public saveMessages(userId: string, sessionId: string, messages: ChatMessage[]): ChatSession | null {
+    const targetUserId = userId || 'guest'
     let session = this.sessions.find((s) => s.id === sessionId)
 
-    if (!session) {
+    if (session) {
+      // IDOR protection: User A cannot modify or overwrite User B's session
+      if (session.userId !== targetUserId) {
+        return null
+      }
+    } else {
       const firstUserMsg = messages.find((m) => m.role === 'user')?.content || 'New Conversation'
       let title = firstUserMsg.slice(0, 36)
       if (firstUserMsg.length > 36) title += '...'
 
       session = {
         id: sessionId,
-        userId: userId || 'guest',
+        userId: targetUserId,
         title,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -144,10 +150,12 @@ class ChatHistoryService {
     return session
   }
 
-  public async saveMessagesAsync(userId: string, sessionId: string, messages: ChatMessage[]): Promise<ChatSession> {
+  public async saveMessagesAsync(userId: string, sessionId: string, messages: ChatMessage[]): Promise<ChatSession | null> {
     await this.refreshFromDb()
     const session = this.saveMessages(userId, sessionId, messages)
-    await this.persistSessionsAsync()
+    if (session) {
+      await this.persistSessionsAsync()
+    }
     return session
   }
 

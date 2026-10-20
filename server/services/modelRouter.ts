@@ -77,11 +77,23 @@ export function selectModelForTask(
   const hasGemini = Boolean(config.geminiApiKey || process.env.GEMINI_API_KEY)
   const hasGroq = Boolean(config.groqApiKey || process.env.GROQ_API_KEY)
   const hasOpenAI = Boolean(config.openaiApiKey || process.env.OPENAI_API_KEY)
+  const configuredProvider = config.aiProvider || (process.env.AI_PROVIDER as any) || 'gemini'
+  const flashModel = process.env.GEMINI_MODEL || (config.modelName?.includes('flash') ? config.modelName : 'gemini-1.5-flash')
 
   // 1. FAST TIER: Optimize for sub-second TTFT and low latency
   if (tier === 'fast') {
-    // Groq is exceptionally fast (>300 tokens/sec, TTFT ~200ms)
-    if (hasGroq && (config.aiProvider === 'groq' || !config.aiProvider)) {
+    // If Gemini is the configured provider or default
+    if (configuredProvider === 'gemini') {
+      return {
+        tier: 'fast',
+        provider: 'gemini',
+        modelName: flashModel,
+        reason: 'Fast Gemini Flash model selected for low latency and high conversational accuracy.',
+      }
+    }
+
+    // Groq if explicitly chosen or configured
+    if (hasGroq && configuredProvider === 'groq') {
       return {
         tier: 'fast',
         provider: 'groq',
@@ -90,18 +102,8 @@ export function selectModelForTask(
       }
     }
 
-    // Google Gemini 2.0 / 1.5 Flash (TTFT ~400-800ms)
-    if (hasGemini && (config.aiProvider === 'gemini' || config.aiProvider === 'builtin' || !config.aiProvider)) {
-      return {
-        tier: 'fast',
-        provider: 'gemini',
-        modelName: config.modelName?.includes('flash') ? config.modelName : 'gemini-1.5-flash',
-        reason: 'Fast Gemini Flash selected for low latency and high accuracy.',
-      }
-    }
-
     // OpenAI gpt-4o-mini
-    if (hasOpenAI && config.aiProvider === 'openai') {
+    if (hasOpenAI && configuredProvider === 'openai') {
       return {
         tier: 'fast',
         provider: 'openai',
@@ -110,7 +112,17 @@ export function selectModelForTask(
       }
     }
 
-    // Free built-in tier: fast conversational engine or Pollinations
+    // Fallback if Gemini key is available
+    if (hasGemini) {
+      return {
+        tier: 'fast',
+        provider: 'gemini',
+        modelName: flashModel,
+        reason: 'Fast Gemini Flash selected as primary available AI provider.',
+      }
+    }
+
+    // Free built-in tier
     return {
       tier: 'fast',
       provider: 'builtin',
@@ -120,16 +132,16 @@ export function selectModelForTask(
   }
 
   // 2. REASONING TIER: Optimize for complex code generation, logical depth, and structure
-  if (hasGemini && (config.aiProvider === 'gemini' || config.aiProvider === 'builtin' || !config.aiProvider)) {
+  if (configuredProvider === 'gemini') {
     return {
       tier: 'reasoning',
       provider: 'gemini',
-      modelName: config.modelName || 'gemini-1.5-pro',
+      modelName: 'gemini-1.5-pro',
       reason: 'Gemini Pro selected for deep multi-step reasoning and technical accuracy.',
     }
   }
 
-  if (hasOpenAI && config.aiProvider === 'openai') {
+  if (hasOpenAI && configuredProvider === 'openai') {
     return {
       tier: 'reasoning',
       provider: 'openai',
@@ -138,12 +150,21 @@ export function selectModelForTask(
     }
   }
 
-  if (hasGroq && config.aiProvider === 'groq') {
+  if (hasGroq && configuredProvider === 'groq') {
     return {
       tier: 'reasoning',
       provider: 'groq',
       modelName: 'llama-3.3-70b-versatile',
       reason: 'Groq Llama-3.3-70B selected for high-capacity reasoning.',
+    }
+  }
+
+  if (hasGemini) {
+    return {
+      tier: 'reasoning',
+      provider: 'gemini',
+      modelName: 'gemini-1.5-pro',
+      reason: 'Gemini Pro selected as primary available reasoning provider.',
     }
   }
 

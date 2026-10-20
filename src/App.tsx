@@ -24,6 +24,7 @@ import {
   DEFAULT_VOICE_SETTINGS,
 } from './utils/voiceManager'
 import { safeApiFetch } from './utils/api'
+import { initTheme } from './utils/themeManager'
 
 export const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([])
@@ -65,7 +66,7 @@ export const App: React.FC = () => {
   const currentSessionIdRef = useRef<string | null>(null)
 
   const [config, setConfig] = useState<AppConfig>({
-    aiProvider: 'builtin',
+    aiProvider: 'gemini',
     searchProvider: 'duckduckgo',
     searchMode: 'auto',
     modelName: 'gemini-1.5-flash',
@@ -79,6 +80,11 @@ export const App: React.FC = () => {
   useEffect(() => {
     configRef.current = config
   }, [config])
+
+  // Initialize theme mode and system preference listener
+  useEffect(() => {
+    return initTheme()
+  }, [])
 
   const isSpeakingRef = useRef(false)
   const speakingMessageIdRef = useRef<string | null>(null)
@@ -811,6 +817,18 @@ export const App: React.FC = () => {
           history,
           searchMode: config.searchMode,
           reasoningMode: config.reasoningMode,
+          aiProvider: config.aiProvider || 'gemini',
+          modelName: config.modelName || 'gemini-1.5-flash',
+          // Never send shared server keys from the browser; only pass client BYOK key if explicitly configured
+          ...(config.geminiApiKey && config.geminiApiKey.trim().length > 10 && !config.geminiApiKey.includes('••') && !config.geminiApiKey.includes('**')
+            ? { geminiApiKey: config.geminiApiKey.trim() }
+            : {}),
+          ...(config.openaiApiKey && config.openaiApiKey.trim().length > 10 && !config.openaiApiKey.includes('••') && !config.openaiApiKey.includes('**')
+            ? { openaiApiKey: config.openaiApiKey.trim() }
+            : {}),
+          ...(config.groqApiKey && config.groqApiKey.trim().length > 10 && !config.groqApiKey.includes('••') && !config.groqApiKey.includes('**')
+            ? { groqApiKey: config.groqApiKey.trim() }
+            : {}),
         }),
         signal: controller.signal,
       })
@@ -1091,6 +1109,43 @@ export const App: React.FC = () => {
           isOpen={isSettingsOpen}
           onClose={() => setIsSettingsOpen(false)}
           onSave={handleUpdateConfig}
+          onOpenMemory={() => {
+            setIsSettingsOpen(false)
+            setIsMemoryOpen(true)
+          }}
+          onClearAllChats={async () => {
+            for (const s of sessions) {
+              await safeApiFetch(`/api/chats/${s.id}`, {
+                method: 'DELETE',
+                headers: getAuthHeaders(),
+              })
+            }
+            setSessions([])
+            try {
+              localStorage.removeItem('mana_cached_sessions')
+            } catch {}
+            handleClearChat()
+          }}
+          onExportChats={() => {
+            const exportData = {
+              exportedAt: new Date().toISOString(),
+              version: '1.2.0',
+              sessions,
+              currentMessages: messages,
+              user: currentUser?.email || 'guest',
+            }
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+              type: 'application/json',
+            })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `mana-ai-chat-export-${new Date().toISOString().slice(0, 10)}.json`
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
+            URL.revokeObjectURL(url)
+          }}
         />
 
         {/* Memory Modal */}
