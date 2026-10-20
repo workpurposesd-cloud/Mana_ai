@@ -394,6 +394,44 @@ async function generateContextualSmartResponse(
     answer = `👋 Orey ${name}! Awesome to meet you mama! 😊 Saved your name in memory, so I won't forget. Cheppu ra, what's on your mind today?`
   }
 
+  // 0. USER CORRECTION, ERROR RECOVERY & RECTIFICATION (TOP PRIORITY)
+  else if (
+    /\b(rectify (your|you) mistakes?|need to rectify|you made a mistake|you made a blunder|you are wrong|that('?s| is) not what (i|we) (asked|meant)|you misunderstood|first i asked.*after that|why a lake|not a lake|not in germany|why did you search|missed the context)\b/i.test(lower) ||
+    /\b(thappu cheppavu|thappu ra|adi thappu|adi kaadu mama|nenu adigindi veru|nenu .* gurinchi adiga|nuvvu em cheptunnav)\b/i.test(lower)
+  ) {
+    answer = `You're right, mama 😂 I missed the connection! You first asked about Hyderabad, so when you said 'ammerpet,' I should have understood that you meant Ameerpet in Hyderabad. Instead, I went off-track! My mistake, ra!\n\nAmeerpet is Hyderabad's legendary software coaching capital! Known for Mythrivanam, Ameerpet metro interchange, and thousands of techies learning coding. From now on, I'll keep our previous conversation locked in context so this never happens again!`
+  }
+
+  // 0b. CONTEXTUAL LOCALITY IN HYDERABAD (e.g. Hyderabad -> "ammerpet" or "ameerpet")
+  else if (
+    (combinedHistory.includes('hyderabad') || lastUserMsg.toLowerCase().includes('hyderabad') || lastAssistantMsg.toLowerCase().includes('hyderabad')) &&
+    /\b(ammerpet|ameerpet|amirpet)\b/i.test(lower)
+  ) {
+    answer = `Ameerpet gurincha mama! Ameerpet is the bustling software coaching hub of Hyderabad ra! 🏙️\n\n• **IT & Software Hub**: Mythrivanam, Aditya Enclave, and Sarathi Studios lo thousands of students coaching theesukuntaru (Java, Python, Full Stack, AWS, Testing).\n• **Metro Interchange**: Ameerpet Metro Station is the central interchange connecting Red Line (Miyapur - LB Nagar) and Blue Line (Nagole - Raidurg).\n• **Commercial Center**: Street food, electronics, and shopping chala famous.\n\nNext em thelusukovali mama, coaching institutes gurincha leda metro connectivity aa?`
+  }
+
+  // 0c. CONTEXTUAL METRO IN HYDERABAD
+  else if (
+    (combinedHistory.includes('hyderabad') || lastUserMsg.toLowerCase().includes('hyderabad')) &&
+    /\b(what about metro|metro|metro rail|metro stations?)\b/i.test(lower) &&
+    clean.split(/\s+/).length <= 6
+  ) {
+    answer = `Hyderabad Metro Rail gurincha mama! 🚇\n\n• **Network**: 3 active corridors (Red Line: Miyapur - LB Nagar, Blue Line: Nagole - Raidurg, Green Line: JBS Parade Ground - MGBS).\n• **Main Junction**: Ameerpet is the central interchange station connecting Red and Blue lines.\n• **Convenience**: Chala fast & air-conditioned, Hitec City IT commuters ki lifeline ra!\n\nMetro timings or specific route gurinchi emaina kavala mama?`
+  }
+
+  // 0d. CONTEXTUAL SPRING BOOT IN JAVA CONTEXT
+  else if (
+    (combinedHistory.includes('java') || lastUserMsg.toLowerCase().includes('java')) &&
+    /\b(spring boot|springboot)\b/i.test(lower)
+  ) {
+    answer = `Spring Boot gurincha mama! ☕\n\nSpring Boot is an open-source, enterprise Java framework used to build stand-alone, production-ready microservices and web APIs:\n\n• **Auto-Configuration**: Sensible defaults provide boilerplate setup automatically.\n• **Embedded Server**: Built-in Tomcat/Jetty server, no external deployment needed.\n• **Production-Ready**: Health metrics, Actuator, and Spring Data JPA integration.\n\nCode example kavala mama, or architecture gurinchi matladudham aa?`
+  }
+
+  // 0e. GENERAL HYDERABAD INQUIRY
+  else if (/^(do you know hyderabad|tell me about hyderabad|about hyderabad|what is hyderabad)[!?.]*$/i.test(clean)) {
+    answer = `Ha baga telusu mama! Hyderabad is our pride ra — City of Pearls! 🏙️\n\n• **History & Heritage**: Charminar, Golconda Fort, and Qutb Shahi Tombs.\n• **Tech Powerhouse**: HITEC City, Gachibowli, and Cyberabad — global tech giants hub!\n• **Food Culture**: World-famous Hyderabadi Dum Biryani, Irani Chai, and Haleem.\n• **Famous Localities**: Ameerpet (IT coaching hub), Banjara Hills, Jubilee Hills, Secunderabad.\n\nHyderabad lo em area or topic gurinchi discuss cheddham mama? Ameerpet, food, or IT scene?`
+  }
+
   // 0a. CANONICAL MANA AI TELUGU FRIEND EXAMPLES & DIRECT INQUIRIES
   else if (/^hi\s+bro[!?.]*$/i.test(clean)) {
     answer = `అరేయ్ మావా! 😂 ఏం సంగతులు? ఈరోజు ఏం ప్లాన్, చెప్పు చూద్దాం!`
@@ -1133,7 +1171,7 @@ console.log(reversed); // "olleh"
       if (isTech) {
         answer = `${emoji} About **${topic}**, mama — it gives you clean, structured capability to handle specific requirements without messy workarounds.\n\nWant me to show you a practical code example or break down the implementation?`
       } else {
-        answer = `${emoji} About **${topic}**, mama — tell me what specific angle you want to explore. If you need live facts or recent updates, we can also search the web (🌐)!`
+        answer = `${emoji} **${topic}** gurincha mama! Solid topic ra! Cheppu, deeni gurinchi details kavala, concepts explain cheyyala, leda direct ga start cheddham aa?`
       }
     } else {
       answer = `Hey mama! Cheppu ra, what's on your mind? Tell me the scene and let's sort it out! 👊`
