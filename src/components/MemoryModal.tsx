@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { X, Brain, Plus, Trash2, Edit2, Check, Sparkles, RefreshCw } from 'lucide-react'
+import { safeApiFetch } from '../utils/api'
 
 export interface MemoryItem {
   id: string
@@ -27,9 +28,10 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({ isOpen, onClose }) => 
   const fetchMemories = async () => {
     setIsLoading(true)
     try {
-      const res = await fetch('/api/memories')
-      const data = await res.json()
-      if (data.memories) setMemories(data.memories)
+      const res = await safeApiFetch<{ memories: MemoryItem[] }>('/api/memories')
+      if (res.success && res.data?.memories) {
+        setMemories(res.data.memories)
+      }
     } catch (err) {
       console.error('Error fetching memories:', err)
     } finally {
@@ -50,18 +52,16 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({ isOpen, onClose }) => 
     if (!newKey.trim() || !newValue.trim()) return
 
     try {
-      const res = await fetch('/api/memories', {
+      const res = await safeApiFetch<{ memory: MemoryItem }>('/api/memories', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           category: newCategory,
           key: newKey.trim(),
           value: newValue.trim(),
         }),
       })
-      const data = await res.json()
-      if (data.success && data.memory) {
-        setMemories((prev) => [data.memory, ...prev.filter((m) => m.id !== data.memory.id)])
+      if (res.success && res.data?.memory) {
+        setMemories((prev) => [res.data!.memory, ...prev.filter((m) => m.id !== res.data!.memory.id)])
         setNewKey('')
         setNewValue('')
       }
@@ -72,9 +72,8 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({ isOpen, onClose }) => 
 
   const handleDelete = async (id: string) => {
     try {
-      const res = await fetch(`/api/memories/${id}`, { method: 'DELETE' })
-      const data = await res.json()
-      if (data.success) {
+      const res = await safeApiFetch(`/api/memories/${id}`, { method: 'DELETE' })
+      if (res.success) {
         setMemories((prev) => prev.filter((m) => m.id !== id))
       }
     } catch (err) {
@@ -85,17 +84,15 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({ isOpen, onClose }) => 
   const handleSaveEdit = async (id: string) => {
     if (!editValue.trim()) return
     try {
-      const res = await fetch(`/api/memories/${id}`, {
+      const res = await safeApiFetch<{ memory: MemoryItem }>(`/api/memories/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           value: editValue.trim(),
         }),
       })
-      const data = await res.json()
-      if (data.success && data.memory) {
+      if (res.success && res.data?.memory) {
         setMemories((prev) =>
-          prev.map((m) => (m.id === id ? data.memory : m))
+          prev.map((m) => (m.id === id ? res.data!.memory : m))
         )
         setEditingId(null)
       }
@@ -107,7 +104,7 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({ isOpen, onClose }) => 
   const handleClearAll = async () => {
     if (!window.confirm('Are you sure you want to clear all stored memories?')) return
     try {
-      await fetch('/api/memories', { method: 'DELETE' })
+      await safeApiFetch('/api/memories', { method: 'DELETE' })
       setMemories([])
     } catch (err) {
       console.error('Error clearing memories:', err)

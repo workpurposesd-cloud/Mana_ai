@@ -1,22 +1,5 @@
-import fs from 'fs'
-import path from 'path'
 import crypto from 'crypto'
-import { fileURLToPath } from 'url'
-
-function resolveDataDir(): string {
-  if (process.env.DATA_DIR) return process.env.DATA_DIR
-  if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) return '/tmp'
-  try {
-    if (typeof __dirname !== 'undefined') return path.resolve(__dirname, '../data')
-    if (typeof import.meta !== 'undefined' && import.meta.url) {
-      return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data')
-    }
-  } catch {}
-  return path.resolve(process.cwd(), 'server', 'data')
-}
-
-const DATA_DIR = resolveDataDir()
-const USERS_FILE = path.join(DATA_DIR, 'users.json')
+import { dbService } from './dbService.js'
 
 export interface User {
   id: string
@@ -29,66 +12,67 @@ export interface User {
 
 class AuthService {
   private users: User[] = []
+  private isLoaded: boolean = false
 
   constructor() {
-    this.ensureDataDir()
-    this.loadUsers()
+    this.initDefaultUsers()
   }
 
-  private ensureDataDir() {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true })
+  private initDefaultUsers() {
+    this.users = dbService.getSync<User[]>('users', [])
+    if (this.users.length === 0) {
+      const defaultHash = this.hashPassword('password123')
+      this.users = [
+        {
+          id: 'user-default-1',
+          name: 'U Nagesh',
+          email: 'nagesh@mana.ai',
+          passwordHash: defaultHash,
+          createdAt: new Date().toISOString(),
+        },
+      ]
+      dbService.setSync('users', this.users)
     }
+    this.isLoaded = true
   }
 
-  private loadUsers() {
+  public async refreshFromDb(): Promise<void> {
     try {
-      if (fs.existsSync(USERS_FILE)) {
-        const raw = fs.readFileSync(USERS_FILE, 'utf-8')
-        this.users = JSON.parse(raw)
-      } else {
-        // Create initial default user for Nagesh
-        const defaultHash = this.hashPassword('password123')
-        this.users = [
-          {
-            id: 'user-default-1',
-            name: 'U Nagesh',
-            email: 'nagesh@mana.ai',
-            passwordHash: defaultHash,
-            createdAt: new Date().toISOString(),
-          },
-        ]
-        this.saveUsers()
-      }
-    } catch (err) {
-      console.error('[AuthService] Error loading users:', err)
-      this.users = []
-    }
-  }
-
-  private saveUsers() {
-    try {
-      this.ensureDataDir()
-      fs.writeFileSync(USERS_FILE, JSON.stringify(this.users, null, 2), 'utf-8')
-    } catch (err) {
-      console.error('[AuthService] Error saving users:', err)
-    }
+      this.users = await dbService.getFresh<User[]>('users', this.users)
+    } catch {}
   }
 
   public hashPassword(password: string): string {
-    return crypto.createHash('sha256').update(password + '_mana_salt').digest('hex')
+    return crypto.createHash('sha256').update(password + '_mana_secure_salt_2026').digest('hex')
   }
 
-  public signup(name: string, email: string, password: string): { user: Omit<User, 'passwordHash'>; token: string } {
+  public async signup(
+    name: string,
+    email: string,
+    password: string
+  ): Promise<{ user: Omit<User, 'passwordHash'>; token: string }> {
+    await this.refreshFromDb()
+
     const cleanEmail = email.toLowerCase().trim()
     const cleanName = name.trim()
 
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      throw new Error('Please enter a valid email address.')
+    }
+    if (!cleanName || cleanName.length < 2) {
+      throw new Error('Please enter your full name (minimum 2 characters).')
+    }
+    if (!password || password.length < 6) {
+      throw new Error('Password must be at least 6 characters long.')
+    }
+
+    // Check duplicate account
     if (this.users.some((u) => u.email.toLowerCase() === cleanEmail)) {
-      throw new Error('An account with this email already exists.')
+      throw new Error('An account with this email address already exists. Please sign in instead.')
     }
 
     const newUser: User = {
-      id: `usr-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      id: `usr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       name: cleanName,
       email: cleanEmail,
       passwordHash: this.hashPassword(password),
@@ -96,24 +80,38 @@ class AuthService {
     }
 
     this.users.push(newUser)
-    this.saveUsers()
+    await dbService.set('users', this.users)
 
     const token = this.generateToken(newUser)
     const { passwordHash, ...userWithoutPassword } = newUser
     return { user: userWithoutPassword, token }
   }
 
-  public login(email: string, password: string): { user: Omit<User, 'passwordHash'>; token: string } {
+  public async login(
+    email: string,
+    password: string
+  ): Promise<{ user: Omit<User, 'passwordHash'>; token: string }> {
+    await this.refreshFromDb()
+
     const cleanEmail = email.toLowerCase().trim()
     const user = this.users.find((u) => u.email.toLowerCase() === cleanEmail)
 
     if (!user) {
-      throw new Error('Invalid email or password.')
+      throw new Error('Invalid email or password. Please check your credentials.')
     }
 
     const hash = this.hashPassword(password)
-    if (user.passwordHash !== hash) {
-      throw new Error('Invalid email or password.')
+    // Support legacy salt migration if necessary
+    const legacyHash = crypto.createHash('sha256').update(password + '_mana_salt').digest('hex')
+
+    if (user.passwordHash !== hash && user.passwordHash !== legacyHash) {
+      throw new Error('Invalid email or password. Please check your credentials.')
+    }
+
+    // If logged in with legacy hash, upgrade to current salt
+    if (user.passwordHash === legacyHash) {
+      user.passwordHash = hash
+      await dbService.set('users', this.users)
     }
 
     const token = this.generateToken(user)
@@ -121,12 +119,36 @@ class AuthService {
     return { user: userWithoutPassword, token }
   }
 
+  public async resetPassword(email: string, newPassword: string): Promise<boolean> {
+    await this.refreshFromDb()
+
+    const cleanEmail = email.toLowerCase().trim()
+    const user = this.users.find((u) => u.email.toLowerCase() === cleanEmail)
+
+    if (!user) {
+      throw new Error('No account found with this email address.')
+    }
+    if (!newPassword || newPassword.length < 6) {
+      throw new Error('New password must be at least 6 characters long.')
+    }
+
+    user.passwordHash = this.hashPassword(newPassword)
+    await dbService.set('users', this.users)
+    return true
+  }
+
   private getAuthSecret(): string {
     return process.env.AUTH_SECRET || 'mana_ai_auth_hmac_secret_key_2026_secured'
   }
 
   public generateToken(user: User): string {
-    const payload = JSON.stringify({ id: user.id, email: user.email, exp: Date.now() + 30 * 24 * 3600 * 1000 })
+    const payload = JSON.stringify({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      createdAt: user.createdAt,
+      exp: Date.now() + 30 * 24 * 3600 * 1000, // 30 days session
+    })
     const payloadB64 = Buffer.from(payload).toString('base64url')
     const sig = crypto.createHmac('sha256', this.getAuthSecret()).update(payloadB64).digest('base64url')
     return `${payloadB64}.${sig}`
@@ -136,7 +158,6 @@ class AuthService {
     try {
       if (!token || typeof token !== 'string') return null
 
-      // Check signed token format: payloadB64.signature
       const parts = token.split('.')
       let payload: any = null
 
@@ -147,7 +168,7 @@ class AuthService {
         const decoded = Buffer.from(payloadB64, 'base64url').toString('utf-8')
         payload = JSON.parse(decoded)
       } else {
-        // Legacy base64 support during transition
+        // Fallback for base64
         const decoded = Buffer.from(token, 'base64').toString('utf-8')
         payload = JSON.parse(decoded)
       }
@@ -155,21 +176,35 @@ class AuthService {
       if (!payload || !payload.id) return null
       if (payload.exp && Date.now() > payload.exp) return null
 
+      // Check current in-memory cache
       const user = this.users.find((u) => u.id === payload.id)
-      if (!user) return null
+      if (user) {
+        const { passwordHash, ...userWithoutPassword } = user
+        return userWithoutPassword
+      }
 
-      const { passwordHash, ...userWithoutPassword } = user
-      return userWithoutPassword
+      // If user signed up on another container or cold boot, verified HMAC payload provides identity
+      if (payload.email) {
+        return {
+          id: payload.id,
+          email: payload.email,
+          name: payload.name || payload.email.split('@')[0],
+          createdAt: payload.createdAt || new Date().toISOString(),
+        }
+      }
+
+      return null
     } catch {
       return null
     }
   }
 
-  public updateUserGeminiKey(userId: string, key: string): boolean {
+  public async updateUserGeminiKey(userId: string, key: string): Promise<boolean> {
+    await this.refreshFromDb()
     const user = this.users.find((u) => u.id === userId)
     if (!user) return false
     user.geminiApiKey = key
-    this.saveUsers()
+    await dbService.set('users', this.users)
     return true
   }
 }

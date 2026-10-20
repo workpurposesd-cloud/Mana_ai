@@ -1,22 +1,5 @@
-import fs from 'fs'
-import path from 'path'
-import { fileURLToPath } from 'url'
 import { ChatMessage } from '../types.js'
-
-function resolveDataDir(): string {
-  if (process.env.DATA_DIR) return process.env.DATA_DIR
-  if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) return '/tmp'
-  try {
-    if (typeof __dirname !== 'undefined') return path.resolve(__dirname, '../data')
-    if (typeof import.meta !== 'undefined' && import.meta.url) {
-      return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data')
-    }
-  } catch {}
-  return path.resolve(process.cwd(), 'server', 'data')
-}
-
-const DATA_DIR = resolveDataDir()
-const CHATS_FILE = path.join(DATA_DIR, 'chats.json')
+import { dbService } from './dbService.js'
 
 export interface ChatSession {
   id: string
@@ -31,38 +14,21 @@ class ChatHistoryService {
   private sessions: ChatSession[] = []
 
   constructor() {
-    this.ensureDataDir()
-    this.loadSessions()
+    this.sessions = dbService.getSync<ChatSession[]>('chats', [])
   }
 
-  private ensureDataDir() {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true })
-    }
-  }
-
-  private loadSessions() {
+  public async refreshFromDb(): Promise<void> {
     try {
-      if (fs.existsSync(CHATS_FILE)) {
-        const raw = fs.readFileSync(CHATS_FILE, 'utf-8')
-        this.sessions = JSON.parse(raw)
-      } else {
-        this.sessions = []
-        this.saveSessions()
-      }
-    } catch (err) {
-      console.error('[ChatHistoryService] Error loading chats:', err)
-      this.sessions = []
-    }
+      this.sessions = await dbService.getFresh<ChatSession[]>('chats', this.sessions)
+    } catch {}
   }
 
-  private saveSessions() {
-    try {
-      this.ensureDataDir()
-      fs.writeFileSync(CHATS_FILE, JSON.stringify(this.sessions, null, 2), 'utf-8')
-    } catch (err) {
-      console.error('[ChatHistoryService] Error saving chats:', err)
-    }
+  private persistSessions() {
+    dbService.setSync('chats', this.sessions)
+  }
+
+  public async persistSessionsAsync(): Promise<void> {
+    await dbService.set('chats', this.sessions)
   }
 
   public getUserSessions(userId: string, filterQuery?: string): Omit<ChatSession, 'messages'>[] {
@@ -108,8 +74,15 @@ class ChatHistoryService {
     }
 
     this.sessions.unshift(newSession)
-    this.saveSessions()
+    this.persistSessions()
     return newSession
+  }
+
+  public async createSessionAsync(userId: string, firstMessage?: string): Promise<ChatSession> {
+    await this.refreshFromDb()
+    const session = this.createSession(userId, firstMessage)
+    await this.persistSessionsAsync()
+    return session
   }
 
   public saveMessages(userId: string, sessionId: string, messages: ChatMessage[]): ChatSession {
@@ -142,7 +115,14 @@ class ChatHistoryService {
       }
     }
 
-    this.saveSessions()
+    this.persistSessions()
+    return session
+  }
+
+  public async saveMessagesAsync(userId: string, sessionId: string, messages: ChatMessage[]): Promise<ChatSession> {
+    await this.refreshFromDb()
+    const session = this.saveMessages(userId, sessionId, messages)
+    await this.persistSessionsAsync()
     return session
   }
 
@@ -153,10 +133,19 @@ class ChatHistoryService {
       (s) => !(s.id === sessionId && s.userId === targetUserId)
     )
     if (this.sessions.length !== initialLen) {
-      this.saveSessions()
+      this.persistSessions()
       return true
     }
     return false
+  }
+
+  public async deleteSessionAsync(userId: string, sessionId: string): Promise<boolean> {
+    await this.refreshFromDb()
+    const deleted = this.deleteSession(userId, sessionId)
+    if (deleted) {
+      await this.persistSessionsAsync()
+    }
+    return deleted
   }
 
   public renameSession(userId: string, sessionId: string, newTitle: string): ChatSession | null {
@@ -167,7 +156,16 @@ class ChatHistoryService {
     if (!session) return null
     session.title = newTitle.trim()
     session.updatedAt = new Date().toISOString()
-    this.saveSessions()
+    this.persistSessions()
+    return session
+  }
+
+  public async renameSessionAsync(userId: string, sessionId: string, newTitle: string): Promise<ChatSession | null> {
+    await this.refreshFromDb()
+    const session = this.renameSession(userId, sessionId, newTitle)
+    if (session) {
+      await this.persistSessionsAsync()
+    }
     return session
   }
 }

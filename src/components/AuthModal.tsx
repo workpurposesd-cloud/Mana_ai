@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
-import { X, Lock, Mail, User as UserIcon, LogIn, UserPlus, Sparkles, AlertCircle, Check } from 'lucide-react'
+import { X, Lock, Mail, User as UserIcon, LogIn, UserPlus, Sparkles, AlertCircle, Check, KeyRound } from 'lucide-react'
 import { ManaLogo } from './ManaLogo'
 import { AuthUser } from '../types/chat'
+import { safeApiFetch } from '../utils/api'
 
 interface AuthModalProps {
   isOpen: boolean
@@ -10,7 +11,7 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess }) => {
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+  const [mode, setMode] = useState<'signin' | 'signup' | 'reset'>('signin')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -31,48 +32,70 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
     setError(null)
     setSuccessMsg(null)
 
-    if (!email.trim() || !password.trim()) {
-      setError('Please fill in both email and password.')
+    if (!email.trim()) {
+      setError('Please enter your email address.')
+      return
+    }
+
+    if (!password.trim() || password.length < 6) {
+      setError('Password must be at least 6 characters.')
       return
     }
 
     if (mode === 'signup' && !name.trim()) {
-      setError('Please enter your name.')
+      setError('Please enter your full name.')
       return
     }
 
     setLoading(true)
 
     try {
+      if (mode === 'reset') {
+        const res = await safeApiFetch<{ message?: string }>('/api/auth/reset-password', {
+          method: 'POST',
+          body: JSON.stringify({ email: email.trim(), newPassword: password }),
+        })
+
+        if (!res.success) {
+          throw new Error(res.error || 'Password reset failed.')
+        }
+
+        setSuccessMsg('✅ Password reset successfully! Please sign in with your new password.')
+        setTimeout(() => {
+          setMode('signin')
+          setSuccessMsg(null)
+        }, 2000)
+        return
+      }
+
       const endpoint = mode === 'signup' ? '/api/auth/signup' : '/api/auth/login'
-      const payload = mode === 'signup' 
+      const payload = mode === 'signup'
         ? { name: name.trim(), email: email.trim(), password }
         : { email: email.trim(), password }
 
-      const res = await fetch(endpoint, {
+      const res = await safeApiFetch<{ user: AuthUser; token: string }>(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
 
-      const data = await res.json()
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Authentication failed. Please check your credentials.')
+      if (!res.success || !res.data) {
+        throw new Error(res.error || 'Authentication failed. Please check your credentials.')
       }
+
+      const { user, token } = res.data
 
       setSuccessMsg(mode === 'signup' ? '🎉 Account created successfully!' : '👋 Welcome back!')
-      
-      // Save to localStorage
-      if (data.token) {
-        localStorage.setItem('mana_auth_token', data.token)
+
+      // Save to localStorage for instant persistence across reloads
+      if (token) {
+        localStorage.setItem('mana_auth_token', token)
       }
-      if (data.user) {
-        localStorage.setItem('mana_user', JSON.stringify(data.user))
+      if (user) {
+        localStorage.setItem('mana_user', JSON.stringify(user))
       }
 
       setTimeout(() => {
-        onAuthSuccess(data.user, data.token)
+        onAuthSuccess(user, token)
         onClose()
       }, 600)
     } catch (err: any) {
@@ -111,6 +134,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
             onClick={() => {
               setMode('signin')
               setError(null)
+              setSuccessMsg(null)
             }}
             id="tab-signin"
           >
@@ -123,11 +147,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
             onClick={() => {
               setMode('signup')
               setError(null)
+              setSuccessMsg(null)
             }}
             id="tab-signup"
           >
             <UserPlus size={15} />
             <span>Sign Up</span>
+          </button>
+          <button
+            type="button"
+            className={`auth-tab-btn ${mode === 'reset' ? 'active' : ''}`}
+            onClick={() => {
+              setMode('reset')
+              setError(null)
+              setSuccessMsg(null)
+            }}
+            id="tab-reset"
+          >
+            <KeyRound size={15} />
+            <span>Reset</span>
           </button>
         </div>
 
@@ -176,7 +214,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
               placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              autoFocus={mode === 'signin'}
+              autoFocus={mode === 'signin' || mode === 'reset'}
               required
             />
           </div>
@@ -184,12 +222,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
           <div className="form-group">
             <label className="form-label">
               <Lock size={14} color="#818cf8" />
-              <span>Password</span>
+              <span>{mode === 'reset' ? 'New Password' : 'Password'}</span>
             </label>
             <input
               type="password"
               className="form-input"
-              placeholder="Enter your password"
+              placeholder={mode === 'reset' ? 'Enter new password (min 6 chars)' : 'Enter your password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -234,8 +272,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
                 <span>Processing...</span>
               ) : mode === 'signin' ? (
                 'Sign In'
-              ) : (
+              ) : mode === 'signup' ? (
                 'Create Account'
+              ) : (
+                'Reset Password'
               )}
             </button>
           </div>

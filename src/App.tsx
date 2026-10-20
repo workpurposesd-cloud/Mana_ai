@@ -23,6 +23,7 @@ import {
   isSpeechRecognitionSupported,
   DEFAULT_VOICE_SETTINGS,
 } from './utils/voiceManager'
+import { safeApiFetch } from './utils/api'
 
 export const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([])
@@ -52,7 +53,14 @@ export const App: React.FC = () => {
   const [authToken, setAuthToken] = useState<string | null>(null)
 
   // Chat sessions & history state
-  const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
+  const [sessions, setSessions] = useState<ChatSessionSummary[]>(() => {
+    try {
+      const cached = localStorage.getItem('mana_cached_sessions')
+      return cached ? JSON.parse(cached) : []
+    } catch {
+      return []
+    }
+  })
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const currentSessionIdRef = useRef<string | null>(null)
 
@@ -125,12 +133,14 @@ export const App: React.FC = () => {
   // Load chat sessions from backend
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch('/api/chats', {
+      const res = await safeApiFetch<{ sessions: ChatSessionSummary[] }>('/api/chats', {
         headers: getAuthHeaders(),
       })
-      const data = await res.json()
-      if (data.success && Array.isArray(data.sessions)) {
-        setSessions(data.sessions)
+      if (res.success && res.data?.sessions && Array.isArray(res.data.sessions)) {
+        setSessions(res.data.sessions)
+        try {
+          localStorage.setItem('mana_cached_sessions', JSON.stringify(res.data.sessions))
+        } catch {}
       }
     } catch (err) {
       console.warn('Could not load chat sessions:', err)
@@ -152,16 +162,15 @@ export const App: React.FC = () => {
         }
       }
 
-      fetch('/api/auth/me', {
+      safeApiFetch<{ user: AuthUser }>('/api/auth/me', {
         headers: { Authorization: `Bearer ${savedToken}` },
       })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.success && data.user) {
-            setCurrentUser(data.user)
-            localStorage.setItem('mana_user', JSON.stringify(data.user))
-          } else {
-            // Token expired
+        .then((res) => {
+          if (res.success && res.data?.user) {
+            setCurrentUser(res.data.user)
+            localStorage.setItem('mana_user', JSON.stringify(res.data.user))
+          } else if (res.status === 401) {
+            // Token expired or invalid
             localStorage.removeItem('mana_auth_token')
             localStorage.removeItem('mana_user')
             setAuthToken(null)
@@ -181,9 +190,12 @@ export const App: React.FC = () => {
 
   // Load config on mount
   useEffect(() => {
-    fetch('/api/config')
-      .then((res) => res.json())
-      .then((data) => setConfig((prev) => ({ ...prev, ...data })))
+    safeApiFetch<AppConfig>('/api/config')
+      .then((res) => {
+        if (res.success && res.data) {
+          setConfig((prev) => ({ ...prev, ...res.data }))
+        }
+      })
       .catch((err) => console.warn('Could not load config:', err))
   }, [])
 
@@ -201,14 +213,13 @@ export const App: React.FC = () => {
 
   const handleUpdateConfig = async (partial: Partial<AppConfig>) => {
     try {
-      const res = await fetch('/api/config', {
+      const res = await safeApiFetch<{ config: AppConfig }>('/api/config', {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify(partial),
       })
-      const data = await res.json()
-      if (data.config) {
-        setConfig(data.config)
+      if (res.success && res.data?.config) {
+        setConfig(res.data.config)
       }
     } catch (err) {
       console.error('Failed to update config:', err)
@@ -346,14 +357,13 @@ export const App: React.FC = () => {
     setIsListening(false)
 
     try {
-      const res = await fetch(`/api/chats/${sessionId}`, {
+      const res = await safeApiFetch<{ session: { messages: Message[] } }>(`/api/chats/${sessionId}`, {
         headers: getAuthHeaders(),
       })
-      const data = await res.json()
-      if (data.success && data.session) {
+      if (res.success && res.data?.session) {
         setCurrentSessionId(sessionId)
         currentSessionIdRef.current = sessionId
-        setMessages(data.session.messages || [])
+        setMessages(res.data.session.messages || [])
         if (window.innerWidth < 820) {
           setIsSidebarOpen(false)
         }
@@ -366,12 +376,18 @@ export const App: React.FC = () => {
   // Delete a chat session
   const handleDeleteSession = async (sessionId: string) => {
     try {
-      await fetch(`/api/chats/${sessionId}`, {
+      await safeApiFetch(`/api/chats/${sessionId}`, {
         method: 'DELETE',
         headers: getAuthHeaders(),
       })
 
-      setSessions((prev) => prev.filter((s) => s.id !== sessionId))
+      setSessions((prev) => {
+        const updated = prev.filter((s) => s.id !== sessionId)
+        try {
+          localStorage.setItem('mana_cached_sessions', JSON.stringify(updated))
+        } catch {}
+        return updated
+      })
 
       if (currentSessionId === sessionId) {
         setCurrentSessionId(null)
@@ -448,7 +464,7 @@ export const App: React.FC = () => {
     )
 
     try {
-      await fetch('/api/feedback', {
+      await safeApiFetch('/api/feedback', {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -467,7 +483,7 @@ export const App: React.FC = () => {
   // Save conversation messages to backend session
   const saveSessionMessages = async (sessionId: string, msgsToSave: Message[]) => {
     try {
-      await fetch(`/api/chats/${sessionId}/messages`, {
+      await safeApiFetch(`/api/chats/${sessionId}/messages`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -532,9 +548,8 @@ export const App: React.FC = () => {
     setIsGenerating(true)
 
     try {
-      const res = await fetch('/api/generate/image', {
+      const res = await safeApiFetch<{ image: GeneratedImageMetadata }>('/api/generate/image', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: promptToSend,
           aspectRatio: customRatio || imageAspectRatio,
@@ -542,25 +557,25 @@ export const App: React.FC = () => {
         }),
       })
 
-      const data = await res.json()
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Image generation failed.')
+      if (!res.success || !res.data?.image) {
+        throw new Error(res.error || 'Image generation failed.')
       }
 
+      const generatedImage = res.data.image
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
             ? {
                 ...m,
                 isGeneratingMedia: false,
-                image: data.image,
+                image: generatedImage,
               }
             : m
         )
       )
       saveSessionMessages(activeSessionId, [
         ...nextMessages.filter((m) => m.id !== assistantId),
-        { ...assistantMessage, isGeneratingMedia: false, image: data.image },
+        { ...assistantMessage, isGeneratingMedia: false, image: generatedImage },
       ])
     } catch (err: any) {
       console.error('[App] Image generation error:', err)
@@ -623,9 +638,8 @@ export const App: React.FC = () => {
     setIsGenerating(true)
 
     try {
-      const res = await fetch('/api/generate/video', {
+      const res = await safeApiFetch<{ job: VideoJobMetadata }>('/api/generate/video', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: promptToSend,
           aspectRatio: customRatio || videoAspectRatio,
@@ -633,12 +647,11 @@ export const App: React.FC = () => {
         }),
       })
 
-      const data = await res.json()
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Video generation job failed.')
+      if (!res.success || !res.data?.job) {
+        throw new Error(res.error || 'Video generation job failed.')
       }
 
-      const initialJob = data.job
+      const initialJob = res.data.job
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
@@ -663,10 +676,9 @@ export const App: React.FC = () => {
       // Poll video job status every 2.5 seconds
       const pollInterval = setInterval(async () => {
         try {
-          const pollRes = await fetch(`/api/generate/video/status/${initialJob.jobId}`)
-          const pollData = await pollRes.json()
-          if (pollData.success && pollData.job) {
-            const currentJob = pollData.job
+          const pollRes = await safeApiFetch<{ job: VideoJobMetadata }>(`/api/generate/video/status/${initialJob.jobId}`)
+          if (pollRes.success && pollRes.data?.job) {
+            const currentJob = pollRes.data.job
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId
@@ -791,7 +803,14 @@ export const App: React.FC = () => {
       })
 
       if (!response.ok || !response.body) {
-        throw new Error(`Server returned HTTP ${response.status}`)
+        let errMessage = `Server error (HTTP ${response.status})`
+        try {
+          const errData = await response.json()
+          if (errData.error) {
+            errMessage = typeof errData.error === 'string' ? errData.error : errData.error.message || errMessage
+          }
+        } catch {}
+        throw new Error(errMessage)
       }
 
       const reader = response.body.getReader()

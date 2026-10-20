@@ -96,29 +96,43 @@ function getClientId(req: express.Request): string {
 /**
  * Auth Endpoints: Sign Up, Login, Me
  */
-app.post('/api/auth/signup', (req, res) => {
+app.post('/api/auth/signup', async (req, res) => {
   try {
     const { name, email, password } = req.body
     if (!name || !email || !password) {
       res.status(400).json({ error: 'Name, email, and password are required' })
       return
     }
-    const result = authService.signup(name, email, password)
+    const result = await authService.signup(name, email, password)
     res.json({ success: true, ...result })
   } catch (err: any) {
     res.status(400).json({ error: err.message })
   }
 })
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body
     if (!email || !password) {
       res.status(400).json({ error: 'Email and password are required' })
       return
     }
-    const result = authService.login(email, password)
+    const result = await authService.login(email, password)
     res.json({ success: true, ...result })
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+})
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { email, newPassword } = req.body
+    if (!email || !newPassword) {
+      res.status(400).json({ error: 'Email and new password are required' })
+      return
+    }
+    await authService.resetPassword(email, newPassword)
+    res.json({ success: true, message: 'Password reset successfully. Please log in with your new password.' })
   } catch (err: any) {
     res.status(400).json({ error: err.message })
   }
@@ -136,22 +150,24 @@ app.get('/api/auth/me', (req, res) => {
 /**
  * Chat Sessions & History Endpoints
  */
-app.get('/api/chats', (req, res) => {
+app.get('/api/chats', async (req, res) => {
   const userId = getClientId(req)
   const filterQuery = (req.query.q as string) || ''
+  await chatHistoryService.refreshFromDb()
   const sessions = chatHistoryService.getUserSessions(userId, filterQuery)
   res.json({ success: true, sessions })
 })
 
-app.post('/api/chats', (req, res) => {
+app.post('/api/chats', async (req, res) => {
   const userId = getClientId(req)
   const { title, firstMessage } = req.body
-  const session = chatHistoryService.createSession(userId, firstMessage || title)
+  const session = await chatHistoryService.createSessionAsync(userId, firstMessage || title)
   res.json({ success: true, session })
 })
 
-app.get('/api/chats/:id', (req, res) => {
+app.get('/api/chats/:id', async (req, res) => {
   const userId = getClientId(req)
+  await chatHistoryService.refreshFromDb()
   const session = chatHistoryService.getSession(userId, req.params.id)
   if (!session) {
     res.status(404).json({ error: 'Chat session not found' })
@@ -160,31 +176,31 @@ app.get('/api/chats/:id', (req, res) => {
   res.json({ success: true, session })
 })
 
-app.post('/api/chats/:id/messages', (req, res) => {
+app.post('/api/chats/:id/messages', async (req, res) => {
   const userId = getClientId(req)
   const { messages } = req.body
   if (!Array.isArray(messages)) {
     res.status(400).json({ error: 'Messages array is required' })
     return
   }
-  const session = chatHistoryService.saveMessages(userId, req.params.id, messages)
+  const session = await chatHistoryService.saveMessagesAsync(userId, req.params.id, messages)
   res.json({ success: true, session })
 })
 
-app.delete('/api/chats/:id', (req, res) => {
+app.delete('/api/chats/:id', async (req, res) => {
   const userId = getClientId(req)
-  const deleted = chatHistoryService.deleteSession(userId, req.params.id)
+  const deleted = await chatHistoryService.deleteSessionAsync(userId, req.params.id)
   res.json({ success: deleted })
 })
 
-app.put('/api/chats/:id/title', (req, res) => {
+app.put('/api/chats/:id/title', async (req, res) => {
   const userId = getClientId(req)
   const { title } = req.body
   if (!title) {
     res.status(400).json({ error: 'Title is required' })
     return
   }
-  const session = chatHistoryService.renameSession(userId, req.params.id, title)
+  const session = await chatHistoryService.renameSessionAsync(userId, req.params.id, title)
   res.json({ success: !!session, session })
 })
 
@@ -222,25 +238,28 @@ app.post('/api/config', (req, res) => {
 /**
  * Memory Management Endpoints
  */
-app.get('/api/memories', (_req, res) => {
+app.get('/api/memories', async (_req, res) => {
+  await memoryService.refreshFromDb()
   res.json({ success: true, memories: memoryService.getMemories() })
 })
 
-app.post('/api/memories', (req, res) => {
+app.post('/api/memories', async (req, res) => {
   try {
     const { category, key, value } = req.body
     if (!key || !value) {
       res.status(400).json({ error: 'Key and value are required' })
       return
     }
+    await memoryService.refreshFromDb()
     const memory = memoryService.addMemory(category || 'preference', key, value)
+    await memoryService.saveMemoriesAsync()
     res.json({ success: true, memory })
   } catch (err: any) {
     res.status(500).json({ error: err.message })
   }
 })
 
-app.put('/api/memories/:id', (req, res) => {
+app.put('/api/memories/:id', async (req, res) => {
   try {
     const { id } = req.params
     const { value } = req.body
@@ -248,30 +267,37 @@ app.put('/api/memories/:id', (req, res) => {
       res.status(400).json({ error: 'Value is required' })
       return
     }
-    const updated = memoryService.updateMemory(id, value)
+    await memoryService.refreshFromDb()
+    const updated = memoryService.updateMemory(id, { value })
     if (!updated) {
       res.status(404).json({ error: 'Memory item not found' })
       return
     }
+    await memoryService.saveMemoriesAsync()
     res.json({ success: true, memory: updated })
   } catch (err: any) {
     res.status(500).json({ error: err.message })
   }
 })
 
-app.delete('/api/memories/:id', (req, res) => {
+app.delete('/api/memories/:id', async (req, res) => {
   try {
     const { id } = req.params
+    await memoryService.refreshFromDb()
     const deleted = memoryService.deleteMemory(id)
+    if (deleted) {
+      await memoryService.saveMemoriesAsync()
+    }
     res.json({ success: deleted })
   } catch (err: any) {
     res.status(500).json({ error: err.message })
   }
 })
 
-app.delete('/api/memories', (_req, res) => {
+app.delete('/api/memories', async (_req, res) => {
   try {
     memoryService.clearAllMemories()
+    await memoryService.saveMemoriesAsync()
     res.json({ success: true, message: 'All memories cleared' })
   } catch (err: any) {
     res.status(500).json({ error: err.message })
@@ -677,6 +703,23 @@ app.get('/api/generate/video/:jobId', async (req, res) => {
 
 app.get('/api/video/restrictions', (_req, res) => {
   res.json({ success: true, restrictions: PROVIDER_RESTRICTIONS })
+})
+
+// Catch-all 404 handler for all unmatched API routes - ALWAYS return valid JSON
+app.all('/api/*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: `API route not found: ${req.method} ${req.path}`,
+  })
+})
+
+// Catch-all unhandled error handler - ALWAYS return valid JSON
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('[Mana AI Server Error]', err)
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || 'Internal server error occurred.',
+  })
 })
 
 // Start server if run directly (not as a serverless function)

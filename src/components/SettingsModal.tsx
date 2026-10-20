@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { X, Key, Search, Cpu, Sliders, Check, Globe, RefreshCw, Mic, Volume2, Play, Sparkles, Film } from 'lucide-react'
 import { AppConfig, VoiceLanguage, VoiceSettings } from '../types/chat'
 import { voiceManager, DEFAULT_VOICE_SETTINGS } from '../utils/voiceManager'
+import { safeApiFetch } from '../utils/api'
 
 interface SettingsModalProps {
   config: AppConfig
@@ -69,21 +70,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setIsTestingSearch(true)
     setTestResult(null)
     try {
-      const res = await fetch('/api/search', {
+      const res = await safeApiFetch<{ evidence?: any }>('/api/search', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: testQuery,
           provider: formData.searchProvider,
         }),
       })
-      const data = await res.json()
-      if (data.success && data.evidence) {
+      if (res.success && res.data?.evidence) {
         setTestResult(
-          `✅ Found ${data.evidence.totalFound} results in ${data.evidence.tookMs}ms via ${data.evidence.provider}. Top: "${data.evidence.results[0]?.title || 'No title'}"`
+          `✅ Found ${res.data.evidence.totalFound} results in ${res.data.evidence.tookMs}ms via ${res.data.evidence.provider}. Top: "${res.data.evidence.results[0]?.title || 'No title'}"`
         )
       } else {
-        setTestResult(`❌ Error: ${data.error || 'Search failed'}`)
+        setTestResult(`❌ Error: ${res.error || 'Search failed'}`)
       }
     } catch (err: any) {
       setTestResult(`❌ Network Error: ${err.message}`)

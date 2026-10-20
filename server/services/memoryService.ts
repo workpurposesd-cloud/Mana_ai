@@ -1,22 +1,4 @@
-import fs from 'fs'
-import path from 'path'
-import { fileURLToPath } from 'url'
-
-function resolveDataDir(): string {
-  if (process.env.DATA_DIR) return process.env.DATA_DIR
-  if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) return '/tmp'
-  try {
-    if (typeof __dirname !== 'undefined') return path.resolve(__dirname, '../data')
-    if (typeof import.meta !== 'undefined' && import.meta.url) {
-      return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data')
-    }
-  } catch {}
-  return path.resolve(process.cwd(), 'server', 'data')
-}
-
-const DATA_DIR = resolveDataDir()
-const MEMORIES_FILE = path.join(DATA_DIR, 'memories.json')
-const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json')
+import { dbService } from './dbService.js'
 
 export interface MemoryItem {
   id: string
@@ -42,65 +24,38 @@ class MemoryService {
   private feedbacks: FeedbackItem[] = []
 
   constructor() {
-    this.ensureDataDir()
     this.loadData()
   }
 
-  private ensureDataDir() {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true })
-    }
-  }
-
   private loadData() {
-    try {
-      if (fs.existsSync(MEMORIES_FILE)) {
-        const raw = fs.readFileSync(MEMORIES_FILE, 'utf-8')
-        this.memories = JSON.parse(raw)
-      } else {
-        // Initial friendly default memory
-        this.memories = [
-          {
-            id: 'mem-default-1',
-            category: 'preference',
-            key: 'Communication Style',
-            value: 'Warm, casual, like a trusted friend. Direct answers first, natural emojis.',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ]
-        this.saveMemories()
-      }
-
-      if (fs.existsSync(FEEDBACK_FILE)) {
-        const raw = fs.readFileSync(FEEDBACK_FILE, 'utf-8')
-        this.feedbacks = JSON.parse(raw)
-      } else {
-        this.feedbacks = []
-      }
-    } catch (err) {
-      console.warn('[MemoryService] Error loading data from disk:', err)
-      this.memories = []
-      this.feedbacks = []
+    this.memories = dbService.getSync<MemoryItem[]>('memories', [])
+    if (this.memories.length === 0) {
+      this.memories = [
+        {
+          id: 'mem-default-1',
+          category: 'preference',
+          key: 'Communication Style',
+          value: 'Warm, casual, like a trusted village friend. Direct answers first, natural emojis.',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ]
+      dbService.setSync('memories', this.memories)
     }
   }
 
   private saveMemories() {
-    try {
-      this.ensureDataDir()
-      fs.writeFileSync(MEMORIES_FILE, JSON.stringify(this.memories, null, 2), 'utf-8')
-    } catch (err) {
-      console.error('[MemoryService] Error saving memories to disk:', err)
-    }
+    dbService.setSync('memories', this.memories)
   }
 
-  private saveFeedback() {
+  public async refreshFromDb(): Promise<void> {
     try {
-      this.ensureDataDir()
-      fs.writeFileSync(FEEDBACK_FILE, JSON.stringify(this.feedbacks, null, 2), 'utf-8')
-    } catch (err) {
-      console.error('[MemoryService] Error saving feedback to disk:', err)
-    }
+      this.memories = await dbService.getFresh<MemoryItem[]>('memories', this.memories)
+    } catch {}
+  }
+
+  public async saveMemoriesAsync(): Promise<void> {
+    await dbService.set('memories', this.memories)
   }
 
   public getMemories(): MemoryItem[] {
@@ -108,45 +63,55 @@ class MemoryService {
   }
 
   public addMemory(category: MemoryItem['category'], key: string, value: string): MemoryItem {
-    // Check if key already exists, update if so
-    const existingIdx = this.memories.findIndex(
-      (m) => m.key.toLowerCase() === key.toLowerCase()
+    const existingIndex = this.memories.findIndex(
+      (m) => m.key.toLowerCase().trim() === key.toLowerCase().trim()
     )
 
-    if (existingIdx !== -1) {
-      this.memories[existingIdx].value = value
-      this.memories[existingIdx].category = category
-      this.memories[existingIdx].updatedAt = new Date().toISOString()
+    const now = new Date().toISOString()
+
+    if (existingIndex !== -1) {
+      this.memories[existingIndex] = {
+        ...this.memories[existingIndex],
+        category,
+        value,
+        updatedAt: now,
+      }
       this.saveMemories()
-      return this.memories[existingIdx]
+      return this.memories[existingIndex]
     }
 
-    const item: MemoryItem = {
+    const newMemory: MemoryItem = {
       id: `mem-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       category,
-      key,
-      value,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      key: key.trim(),
+      value: value.trim(),
+      createdAt: now,
+      updatedAt: now,
     }
-    this.memories.unshift(item)
+
+    this.memories.unshift(newMemory)
     this.saveMemories()
-    return item
+    return newMemory
   }
 
-  public updateMemory(id: string, value: string): MemoryItem | null {
-    const item = this.memories.find((m) => m.id === id)
-    if (!item) return null
-    item.value = value
-    item.updatedAt = new Date().toISOString()
+  public updateMemory(id: string, updates: Partial<Pick<MemoryItem, 'category' | 'key' | 'value'>>): MemoryItem | null {
+    const index = this.memories.findIndex((m) => m.id === id)
+    if (index === -1) return null
+
+    this.memories[index] = {
+      ...this.memories[index],
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    }
+
     this.saveMemories()
-    return item
+    return this.memories[index]
   }
 
   public deleteMemory(id: string): boolean {
-    const initialLen = this.memories.length
+    const initialLength = this.memories.length
     this.memories = this.memories.filter((m) => m.id !== id)
-    if (this.memories.length !== initialLen) {
+    if (this.memories.length !== initialLength) {
       this.saveMemories()
       return true
     }
@@ -156,6 +121,10 @@ class MemoryService {
   public clearAllMemories(): void {
     this.memories = []
     this.saveMemories()
+  }
+
+  public saveFeedback(item: Omit<FeedbackItem, 'id' | 'timestamp'>): FeedbackItem {
+    return this.recordFeedback(item)
   }
 
   public recordFeedback(data: Omit<FeedbackItem, 'id' | 'timestamp'>): FeedbackItem {
@@ -169,7 +138,6 @@ class MemoryService {
     if (this.feedbacks.length > 100) {
       this.feedbacks = this.feedbacks.slice(0, 100)
     }
-    this.saveFeedback()
 
     // If thumbs down with a correction/comment, automatically save a learned correction
     if (data.rating === 'thumbs_down' && data.comment) {
@@ -177,6 +145,10 @@ class MemoryService {
     }
 
     return item
+  }
+
+  public getFeedbacks(): FeedbackItem[] {
+    return [...this.feedbacks]
   }
 
   /**
@@ -202,7 +174,6 @@ class MemoryService {
   public detectAndSaveUserPreferences(prompt: string, enabled = true): MemoryItem | null {
     if (!enabled) return null
     const clean = prompt.trim()
-    const lower = clean.toLowerCase()
 
     // 1. Name detection
     const nameMatch = clean.match(/(?:my name is|call me|i am|i'm)\s+([A-Z][a-zA-Z0-9_-]+)/i)
@@ -223,6 +194,41 @@ class MemoryService {
     }
 
     return null
+  }
+
+  public autoExtractMemories(prompt: string, response: string): MemoryItem[] {
+    const extracted: MemoryItem[] = []
+    const lower = prompt.toLowerCase()
+
+    if (/my name is ([a-zA-Z0-9_\s]+)/i.test(prompt)) {
+      const match = prompt.match(/my name is ([a-zA-Z0-9_\s]+)/i)
+      if (match && match[1]) {
+        extracted.push(this.addMemory('personal', "User's Name", match[1].trim()))
+      }
+    }
+
+    if (/i live in ([a-zA-Z0-9_\s,]+)/i.test(prompt) || /i am from ([a-zA-Z0-9_\s,]+)/i.test(prompt)) {
+      const match = prompt.match(/(?:i live in|i am from) ([a-zA-Z0-9_\s,]+)/i)
+      if (match && match[1]) {
+        extracted.push(this.addMemory('personal', 'Location', match[1].trim()))
+      }
+    }
+
+    if (/i prefer ([a-zA-Z0-9_\s,]+)/i.test(prompt)) {
+      const match = prompt.match(/i prefer ([a-zA-Z0-9_\s,]+)/i)
+      if (match && match[1]) {
+        extracted.push(this.addMemory('preference', 'Preference', match[1].trim()))
+      }
+    }
+
+    if (/remember that ([a-zA-Z0-9_\s,.]+)/i.test(prompt)) {
+      const match = prompt.match(/remember that ([a-zA-Z0-9_\s,.]+)/i)
+      if (match && match[1]) {
+        extracted.push(this.addMemory('preference', 'Explicit Note', match[1].trim()))
+      }
+    }
+
+    return extracted
   }
 }
 

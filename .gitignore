@@ -35,6 +35,8 @@ backup*/
 *.zip
 google_page.html
 ddg_test.html
+server/data/media/*
+!server/data/media/.gitkeep
 
 # Local Netlify folder
 .netlify
