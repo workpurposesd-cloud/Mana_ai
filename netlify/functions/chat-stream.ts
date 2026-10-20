@@ -1,4 +1,6 @@
-import type { Config, Context } from '@netlify/functions'
+import { stream } from '@netlify/functions'
+import { PassThrough } from 'node:stream'
+import { connectLambda } from '@netlify/blobs'
 import { configService } from '../../server/services/configService.js'
 import { memoryService } from '../../server/services/memoryService.js'
 import { documentService } from '../../server/services/documentService.js'
@@ -6,40 +8,38 @@ import { classifyIntent } from '../../server/services/intentClassifier.js'
 import { executeWebSearch } from '../../server/services/searchService.js'
 import { generateAIResponse } from '../../server/services/aiService.js'
 import { authService } from '../../server/services/authService.js'
-import { chatHistoryService } from '../../server/services/chatHistoryService.js'
 import { SearchEvidence } from '../../server/types.js'
 
-export default async (req: Request, _context: Context): Promise<Response> => {
-  // Only accept POST requests
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
-    })
-  }
+export const handler = stream(async (event, _context) => {
+  // Connect Netlify Blobs runtime context
+  try {
+    connectLambda(event)
+  } catch {}
 
   const reqStart = Date.now()
-  let body: any
+  let body: any = {}
   try {
-    body = await req.json()
+    body = JSON.parse(event.body || '{}')
   } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
-      status: 400,
+    return {
+      statusCode: 400,
       headers: { 'Content-Type': 'application/json' },
-    })
+      body: JSON.stringify({ error: 'Invalid JSON body' }),
+    }
   }
 
   const { prompt, history = [], searchMode: reqSearchMode, reasoningMode: reqReasoningMode } = body
 
   if (!prompt || typeof prompt !== 'string') {
-    return new Response(JSON.stringify({ error: 'Valid prompt string is required' }), {
-      status: 400,
+    return {
+      statusCode: 400,
       headers: { 'Content-Type': 'application/json' },
-    })
+      body: JSON.stringify({ error: 'Valid prompt string is required' }),
+    }
   }
 
   // Extract auth credentials if present
-  const authHeader = req.headers.get('authorization')
+  const authHeader = event.headers?.['authorization'] || event.headers?.['Authorization']
   let authUser: any = null
   if (authHeader && authHeader.startsWith('Bearer ')) {
     authUser = authService.verifyToken(authHeader.slice(7))
@@ -66,131 +66,112 @@ export default async (req: Request, _context: Context): Promise<Response> => {
     (searchMode === 'always' && intent.category !== 'conversational') ||
     (searchMode === 'auto' && intent.needsSearch)
 
-  const encoder = new TextEncoder()
+  const passThrough = new PassThrough()
 
-  // Build the unbuffered SSE ReadableStream
-  const stream = new ReadableStream({
-    async start(controller) {
-      let isAborted = false
-      req.signal?.addEventListener('abort', () => {
-        isAborted = true
-        try {
-          controller.close()
-        } catch {}
-      })
+  const sendEvent = (eventType: string, data: any) => {
+    passThrough.write(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`)
+  }
 
-      const sendEvent = (event: string, data: any) => {
-        if (isAborted) return
-        const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
-        controller.enqueue(encoder.encode(payload))
-      }
-
+  // Run generation asynchronously and pipe chunks directly into the HTTP stream
+  ;(async () => {
+    try {
       if (learnedMemory) {
         sendEvent('memory_saved', learnedMemory)
       }
 
       let searchEvidence: SearchEvidence | undefined
 
-      try {
-        if (shouldSearch) {
-          sendEvent('search_start', {
-            query: intent.refinedQuery,
-            reason: intent.reason,
-            category: intent.category,
-          })
-
-          sendEvent('search_status', {
-            status: `Searching live web via ${config.searchProvider}...`,
-            step: 'retrieving',
-          })
-
-          searchEvidence = await executeWebSearch(
-            intent.refinedQuery,
-            config.searchProvider,
-            {
-              tavily: config.tavilyApiKey,
-              serper: config.serperApiKey,
-              brave: config.braveApiKey,
-            }
-          )
-
-          sendEvent('search_status', {
-            status: 'Filtering & verifying sources...',
-            step: 'filtering',
-          })
-
-          sendEvent('search_results', searchEvidence)
-        }
+      if (shouldSearch) {
+        sendEvent('search_start', {
+          query: intent.refinedQuery,
+          reason: intent.reason,
+          category: intent.category,
+        })
 
         sendEvent('search_status', {
-          status: reasoningMode === 'thinking' ? 'Deep reasoning & calculating...' : 'Thinking...',
-          step: 'generating',
+          status: `Searching live web via ${config.searchProvider}...`,
+          step: 'retrieving',
         })
 
-        let accumulatedContent = ''
-        let firstTokenTime: number | null = null
+        searchEvidence = await executeWebSearch(
+          intent.refinedQuery,
+          config.searchProvider,
+          {
+            tavily: config.tavilyApiKey,
+            serper: config.serperApiKey,
+            brave: config.braveApiKey,
+          }
+        )
 
-        await generateAIResponse({
-          prompt,
-          history,
-          searchEvidence,
-          memories: relevantMemories,
-          isDetailRequested: intent.isDetailRequested,
-          config,
-          reasoningMode,
-          documentMatches,
-          onToken: (token: string) => {
-            if (isAborted) return
-            if (!firstTokenTime) {
-              firstTokenTime = Date.now() - reqStart
-            }
-            accumulatedContent += token
-            sendEvent('token', { token })
-          },
+        sendEvent('search_status', {
+          status: 'Filtering & verifying sources...',
+          step: 'filtering',
         })
 
-        const totalTime = Date.now() - reqStart
-
-        // Step 4: Complete event with detailed timing instrumentation
-        sendEvent('done', {
-          content: accumulatedContent,
-          searchEvidence,
-          isSearchPerformed: shouldSearch || !!searchEvidence,
-          intent,
-          memoriesUsed: relevantMemories.map((m) => m.key),
-          documentsUsed: documentMatches.map((d) => d.docTitle),
-          reasoningMode,
-          timings: {
-            reqStart,
-            ttftMs: firstTokenTime || totalTime,
-            totalMs: totalTime,
-            isStreaming: true,
-          },
-        })
-
-        controller.close()
-      } catch (err: any) {
-        sendEvent('error', {
-          message: err.message || 'An error occurred during response generation.',
-        })
-        try {
-          controller.close()
-        } catch {}
+        sendEvent('search_results', searchEvidence)
       }
-    },
-  })
 
-  // Return standard Response streaming SSE directly to client
-  return new Response(stream, {
+      sendEvent('search_status', {
+        status: reasoningMode === 'thinking' ? 'Deep reasoning & calculating...' : 'Thinking...',
+        step: 'generating',
+      })
+
+      let accumulatedContent = ''
+      let firstTokenTime: number | null = null
+
+      await generateAIResponse({
+        prompt,
+        history,
+        searchEvidence,
+        memories: relevantMemories,
+        isDetailRequested: intent.isDetailRequested,
+        config,
+        reasoningMode,
+        documentMatches,
+        onToken: (token: string) => {
+          if (!firstTokenTime) {
+            firstTokenTime = Date.now() - reqStart
+          }
+          accumulatedContent += token
+          sendEvent('token', { token })
+        },
+      })
+
+      const totalTime = Date.now() - reqStart
+
+      sendEvent('done', {
+        content: accumulatedContent,
+        searchEvidence,
+        isSearchPerformed: shouldSearch || !!searchEvidence,
+        intent,
+        memoriesUsed: relevantMemories.map((m) => m.key),
+        documentsUsed: documentMatches.map((d) => d.docTitle),
+        reasoningMode,
+        timings: {
+          reqStart,
+          ttftMs: firstTokenTime || totalTime,
+          totalMs: totalTime,
+          isStreaming: true,
+        },
+      })
+
+      passThrough.end()
+    } catch (err: any) {
+      sendEvent('error', {
+        message: err.message || 'An error occurred during response generation.',
+      })
+      passThrough.end()
+    }
+  })()
+
+  return {
+    statusCode: 200,
     headers: {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no',
     },
-  })
-}
-
-export const config: Config = {
-  path: '/api/chat/stream',
-}
+    body: passThrough,
+  }
+})
