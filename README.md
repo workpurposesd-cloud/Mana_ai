@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Mana AI — Your AI. Your World.
 
 **Mana AI** is a personal AI assistant and friend designed to deliver short, warm, and accurate answers, learn your preferences over time, and provide real-time web search with source citations whenever current information is needed.
@@ -49,7 +48,3 @@ Open: **http://localhost:5173**
 ---
 
 © 2026 Mana AI — *Your AI. Your World.*
-=======
-# Mana_ai
-it is my personal ai
->>>>>>> b9a6dcb3faf41453f78ca891006c8ba069a1415e

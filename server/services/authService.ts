@@ -121,15 +121,38 @@ class AuthService {
     return { user: userWithoutPassword, token }
   }
 
+  private getAuthSecret(): string {
+    return process.env.AUTH_SECRET || 'mana_ai_auth_hmac_secret_key_2026_secured'
+  }
+
   public generateToken(user: User): string {
     const payload = JSON.stringify({ id: user.id, email: user.email, exp: Date.now() + 30 * 24 * 3600 * 1000 })
-    return Buffer.from(payload).toString('base64')
+    const payloadB64 = Buffer.from(payload).toString('base64url')
+    const sig = crypto.createHmac('sha256', this.getAuthSecret()).update(payloadB64).digest('base64url')
+    return `${payloadB64}.${sig}`
   }
 
   public verifyToken(token: string): Omit<User, 'passwordHash'> | null {
     try {
-      const decoded = Buffer.from(token, 'base64').toString('utf-8')
-      const payload = JSON.parse(decoded)
+      if (!token || typeof token !== 'string') return null
+
+      // Check signed token format: payloadB64.signature
+      const parts = token.split('.')
+      let payload: any = null
+
+      if (parts.length === 2) {
+        const [payloadB64, sig] = parts
+        const expectedSig = crypto.createHmac('sha256', this.getAuthSecret()).update(payloadB64).digest('base64url')
+        if (sig !== expectedSig) return null
+        const decoded = Buffer.from(payloadB64, 'base64url').toString('utf-8')
+        payload = JSON.parse(decoded)
+      } else {
+        // Legacy base64 support during transition
+        const decoded = Buffer.from(token, 'base64').toString('utf-8')
+        payload = JSON.parse(decoded)
+      }
+
+      if (!payload || !payload.id) return null
       if (payload.exp && Date.now() > payload.exp) return null
 
       const user = this.users.find((u) => u.id === payload.id)

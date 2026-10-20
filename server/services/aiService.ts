@@ -178,12 +178,38 @@ async function generateGeminiStream(
   const genAI = new GoogleGenerativeAI(apiKey)
   const candidateModels = Array.from(new Set([
     modelName,
-    'gemini-1.5-flash-latest',
-    'gemini-2.0-flash',
     'gemini-1.5-flash',
-    'gemini-1.5-pro-latest',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-pro',
     'gemini-pro',
   ]))
+
+  // Sanitize chat history for Gemini:
+  // 1. Filter out empty contents
+  // 2. Ensure roles strictly alternate: user, model, user, model
+  // 3. Ensure first message starts with 'user'
+  const validHistory = (history || [])
+    .filter((msg) => msg && typeof msg.content === 'string' && msg.content.trim())
+    .slice(-16)
+
+  const chatHistory: Array<{ role: 'user' | 'model'; parts: [{ text: string }] }> = []
+  for (const msg of validHistory) {
+    const role: 'user' | 'model' = msg.role === 'assistant' ? 'model' : 'user'
+    if (chatHistory.length === 0 && role === 'model') {
+      // First message must be user
+      continue
+    }
+    if (chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === role) {
+      // Merge consecutive messages of the same role
+      chatHistory[chatHistory.length - 1].parts[0].text += `\n\n${msg.content}`
+    } else {
+      chatHistory.push({
+        role,
+        parts: [{ text: msg.content }],
+      })
+    }
+  }
 
   let lastError: any = null
   for (const candidate of candidateModels) {
@@ -192,12 +218,6 @@ async function generateGeminiStream(
         model: candidate,
         systemInstruction,
       })
-
-      // Format past history for Gemini multi-turn conversation
-      const chatHistory = history.slice(-16).map((msg) => ({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content }],
-      }))
 
       const chat = model.startChat({ history: chatHistory })
       const result = await chat.sendMessageStream(prompt)
@@ -214,8 +234,8 @@ async function generateGeminiStream(
       return fullText
     } catch (err: any) {
       lastError = err
-      if (err.message && (err.message.includes('404') || err.message.includes('not found'))) {
-        console.warn(`[AIService] Gemini model "${candidate}" not found, trying fallback candidate...`)
+      if (err.message && (err.message.includes('404') || err.message.includes('not found') || err.message.includes('deprecated'))) {
+        console.warn(`[AIService] Gemini model "${candidate}" unavailable, trying fallback candidate...`)
         continue
       }
       throw err
@@ -237,11 +257,13 @@ async function generateOpenAIStream(
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
   onToken?: (token: string) => void
 ): Promise<string> {
-  const openai = new OpenAI({ apiKey, baseURL, timeout: 8000, maxRetries: 1 })
+  const openai = new OpenAI({ apiKey, baseURL, timeout: 30000, maxRetries: 1 })
 
   const messages: any[] = [{ role: 'system', content: systemPrompt }]
-  for (const h of history.slice(-16)) {
-    messages.push({ role: h.role, content: h.content })
+  for (const h of (history || []).slice(-16)) {
+    if (h && typeof h.content === 'string' && h.content.trim()) {
+      messages.push({ role: h.role, content: h.content })
+    }
   }
   messages.push({ role: 'user', content: prompt })
 

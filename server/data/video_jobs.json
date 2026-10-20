@@ -1,0 +1,28 @@
+[
+  {
+    "jobId": "vjob-1792474575738-kjdi",
+    "prompt": "hypercar cruising down a rainy neon boulevard at dusk",
+    "provider": "luma",
+    "status": "failed",
+    "progress": 0,
+    "aspectRatio": "16:9",
+    "duration": 5,
+    "error": "Real AI video generation requires an API key for Luma Dream Machine or Replicate. Please open Settings (⚙️) to configure your API key, then try again.",
+    "createdAt": "2026-10-20T05:36:15.738Z",
+    "updatedAt": "2026-10-20T05:36:15.738Z",
+    "providerRestrictions": {
+      "name": "Luma Dream Machine (Ray-2)",
+      "pricing": "~$0.08–$0.25 per generation (Subscription / Pay-as-you-go)",
+      "durationLimit": "5s or 9s cinematic clips",
+      "resolution": "720p or 1080p high fidelity",
+      "docsUrl": "https://lumalabs.ai/dream-machine/api",
+      "supportedAspectRatios": [
+        "16:9",
+        "9:16",
+        "1:1",
+        "4:3",
+        "21:9"
+      ]
+    }
+  }
+]

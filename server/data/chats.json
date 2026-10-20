@@ -1,5 +1,140 @@
 [
   {
+    "id": "session-1792473441194-61wu",
+    "userId": "guest",
+    "title": "hi",
+    "createdAt": "2026-10-20T05:17:27.002Z",
+    "updatedAt": "2026-10-20T05:20:07.232Z",
+    "messages": [
+      {
+        "id": "user-1792473441194",
+        "role": "user",
+        "content": "hi",
+        "timestamp": 1792473441194
+      },
+      {
+        "id": "assistant-1792473441194",
+        "role": "assistant",
+        "content": "Hey, bro! 🖐️ బోర్డ్ ఈ రోజు ఎలా ఉంది? నువ్వు ఏమి ప్లాన్ చేసుకున్నావు? 😏\n\n",
+        "timestamp": 1792473441194
+      },
+      {
+        "id": "user-1792473491852",
+        "role": "user",
+        "content": "what are doing",
+        "timestamp": 1792473491852
+      },
+      {
+        "id": "assistant-1792473491852",
+        "role": "assistant",
+        "content": "I’m just chillin’, ready to dive into whatever you want to talk about! 💻🌟 If you’re in the mood for a throw‑back, the phrase “What Am I Doing in the Middle of a Revolution?” is actually the title of a 1972 Zapata Western comedy film. It’s a quirky take on a western mash‑up. [Wikipedia](https://en.wikipedia.org/wiki/What_Am_I_Doing_in_the_Middle_of_a_Revolution%3F)",
+        "timestamp": 1792473491852,
+        "searchEvidence": {
+          "query": "what are doing",
+          "provider": "duckduckgo",
+          "results": [
+            {
+              "id": "wiki-1792473495000",
+              "title": "What Am I Doing in the Middle of a Revolution?",
+              "url": "https://en.wikipedia.org/wiki/What_Am_I_Doing_in_the_Middle_of_a_Revolution%3F",
+              "snippet": "What Am I Doing in the Middle of a Revolution? is a 1972 Zapata Western comedy film.",
+              "domain": "wikipedia.org",
+              "isOfficialOrReputable": true,
+              "publishedDate": "12/27/2025"
+            }
+          ],
+          "totalFound": 1,
+          "searchedAt": "2026-10-20T05:18:15.206Z",
+          "tookMs": 3334
+        },
+        "isSearchPerformed": true
+      },
+      {
+        "id": "user-1792473550125",
+        "role": "user",
+        "content": "what we can do now",
+        "timestamp": 1792473550125
+      },
+      {
+        "id": "assistant-1792473550125",
+        "role": "assistant",
+        "content": "Hey bored‑king! 😜 Let’s beat the lull. Here’s a quick play‑book for *right now*:\n\n| What to tackle | Why it matters | Get‑started |\n|----------------|----------------|-------------|\n| **Care for your brain & democracy** – vote, sign petitions, or just read a quick news digest.  | Keeps you solid mentally and civically upright.  | 👉 [What Can We Do Now?](https://greatergood.berkeley.edu/article/item/what_can_we_do_now) 🚀 |\n| **Bored hero moves** – 48 quirky activities you can pop into.  | Turbo‑charge fun levels, solo or with crew.  | 👉 [Click here](https://www.wikihow.com/What-to-Do-Right-Now) 🎉 |\n| **Keep tabs on the world** – live global feed + quick‑facts.  | Helps you stay super‑in‑the‑loop and keep curiosity on.  | 👉 [Check the live timeline](https://www.the-world-now.com/global-timeline) 🌍 |\n| **Do something good for Earth** – small habits that actually help the planet.  | Have a feel‑good vibe while you’re at it.  | 👉 [Watch & learn](https://www.youtube.com/watch?v=HnHI5CKxIeA) 🌱 |\n| **Pack productivity** – top 100+ ways to get stuff done *while you’re at it*.  | Mix fun with growth – perfect balance.  | 👉 [Grab the list](https://mantelligence.com/productive-things-to-do/) 📈 |\n\nSo pick one (or a combo). If you’re feeling a bit lazy but still want something fun, go #2. If you wanna keep the world happy, mix #1 or #4. 🚀 Have a blast, bro!",
+        "timestamp": 1792473550125,
+        "searchEvidence": {
+          "query": "what we can do now",
+          "provider": "duckduckgo",
+          "results": [
+            {
+              "id": "search-2",
+              "title": "What Can We Do Now? - Greater Good",
+              "url": "https://greatergood.berkeley.edu/article/item/what_can_we_do_now",
+              "snippet": "While votes for the 2020 election are counted, our contributors weigh in on what we as individuals can do now to preserve our well-being and our democracy.",
+              "domain": "greatergood.berkeley.edu",
+              "isOfficialOrReputable": true
+            },
+            {
+              "id": "search-1",
+              "title": "What to Do Right Now: 48 Fun Things to Do Today - wikiHow",
+              "url": "https://www.wikihow.com/What-to-Do-Right-Now",
+              "snippet": "Creative ideas for things you can do right now whether you're alone or with friends Ready to have fun? You've come to the right place! We've curated the definitive list of fun things to do right now. Whether you've got the whole day free...",
+              "domain": "wikihow.com",
+              "isOfficialOrReputable": false
+            },
+            {
+              "id": "search-3",
+              "title": "Global Timeline: World Events Today, Live | The World Now",
+              "url": "https://www.the-world-now.com/global-timeline",
+              "snippet": "A live timeline of every major world event as it unfolds — wars, disasters, market-moving headlines and AI-detected risk, clustered by day with cause → effect chains. Updated every 5 minutes.",
+              "domain": "the-world-now.com",
+              "isOfficialOrReputable": false
+            },
+            {
+              "id": "search-4",
+              "title": "Climate Change What We Can Do Now - YouTube",
+              "url": "https://www.youtube.com/watch?v=HnHI5CKxIeA",
+              "snippet": "In this video, \"Climate Change: What We Can Do Now,\" we explore the current state of our planet and practical steps you can take to make a real difference.",
+              "domain": "youtube.com",
+              "isOfficialOrReputable": false
+            },
+            {
+              "id": "search-5",
+              "title": "103 Best Productive Things To Do Right Now - Mantelligence",
+              "url": "https://mantelligence.com/productive-things-to-do/",
+              "snippet": "You probably have a long list of productive things to do but are too busy. Let this list of productive ideas guide you in the right direction.",
+              "domain": "mantelligence.com",
+              "isOfficialOrReputable": false
+            }
+          ],
+          "totalFound": 5,
+          "searchedAt": "2026-10-20T05:19:11.458Z",
+          "tookMs": 1319
+        },
+        "isSearchPerformed": true
+      },
+      {
+        "id": "user-1792473598128",
+        "role": "user",
+        "content": "do you know bengaluru",
+        "timestamp": 1792473598128
+      },
+      {
+        "id": "assistant-1792473598128",
+        "role": "assistant",
+        "content": "Bengaluru? Oh yeah! 🏙️ You know it as B‑Capital – Karnataka’s capital, tech hub, and what's havin’ more coffee shops than a street corner! It’s called Bengaluru in Telugu—real‑talk auto‑buzzing in the IT world.  \n\n- **Tech City** – Google, Amazon, Microsoft, Flipkart, all set up shop.  \n- **Planet‑Green** – Lots of parks, the iconic Lalbagh & Cubbon Park.  \n- **Food Vibes** – From Mysore‑style dosas to modern fusion cafés.  \n- **Culture** – Classical music, dance, and that chai‑talk style you’d love.  \n\nSo yeah, I got the vibe! If you wanna plan a visit or just curious about something specific, holler. 😄",
+        "timestamp": 1792473598128,
+        "searchEvidence": {
+          "query": "do you know bengaluru",
+          "provider": "duckduckgo",
+          "results": [],
+          "totalFound": 0,
+          "searchedAt": "2026-10-20T05:20:00.314Z",
+          "tookMs": 2178,
+          "errorMessage": "No relevant search results found for this query."
+        }
+      }
+    ]
+  },
+  {
     "id": "session-1792439806823-opgq",
     "userId": "guest",
     "title": "hi",

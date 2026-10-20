@@ -49,8 +49,22 @@ BEST-FRIEND MINDSET:
 
 import fs from 'fs'
 import path from 'path'
+import { fileURLToPath } from 'url'
 
-const CONFIG_FILE_PATH = path.resolve(process.cwd(), 'server', 'data', 'config.json')
+function resolveDataDir(): string {
+  if (process.env.DATA_DIR) return process.env.DATA_DIR
+  if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) return '/tmp'
+  try {
+    if (typeof __dirname !== 'undefined') return path.resolve(__dirname, '../data')
+    if (typeof import.meta !== 'undefined' && import.meta.url) {
+      return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data')
+    }
+  } catch {}
+  return path.resolve(process.cwd(), 'server', 'data')
+}
+
+const DATA_DIR = resolveDataDir()
+const CONFIG_FILE_PATH = path.join(DATA_DIR, 'config.json')
 
 export class ConfigService {
   private config: AppConfig
@@ -99,9 +113,34 @@ export class ConfigService {
   }
 
   public updateConfig(partial: Partial<AppConfig>): AppConfig {
+    const keyFields = [
+      'geminiApiKey',
+      'openaiApiKey',
+      'groqApiKey',
+      'tavilyApiKey',
+      'serperApiKey',
+      'braveApiKey',
+      'lumaApiKey',
+      'replicateApiKey',
+      'runwayApiKey',
+    ] as const
+
+    const sanitizedPartial: Partial<AppConfig> = { ...partial }
+
+    // Preserve existing real secret keys if incoming key is masked or untouched
+    for (const field of keyFields) {
+      const incomingVal = sanitizedPartial[field]
+      if (typeof incomingVal === 'string') {
+        const trimmed = incomingVal.trim()
+        if (!trimmed || trimmed.includes('••••') || trimmed.includes('****')) {
+          delete sanitizedPartial[field]
+        }
+      }
+    }
+
     this.config = {
       ...this.config,
-      ...partial,
+      ...sanitizedPartial,
     }
     try {
       const dir = path.dirname(CONFIG_FILE_PATH)

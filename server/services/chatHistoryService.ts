@@ -66,7 +66,8 @@ class ChatHistoryService {
   }
 
   public getUserSessions(userId: string, filterQuery?: string): Omit<ChatSession, 'messages'>[] {
-    let list = this.sessions.filter((s) => s.userId === userId || s.userId === 'guest')
+    const targetUserId = userId || 'guest'
+    let list = this.sessions.filter((s) => s.userId === targetUserId)
 
     if (filterQuery && filterQuery.trim()) {
       const q = filterQuery.toLowerCase().trim()
@@ -83,8 +84,9 @@ class ChatHistoryService {
   }
 
   public getSession(userId: string, sessionId: string): ChatSession | null {
+    const targetUserId = userId || 'guest'
     const session = this.sessions.find(
-      (s) => s.id === sessionId && (s.userId === userId || s.userId === 'guest')
+      (s) => s.id === sessionId && s.userId === targetUserId
     )
     return session ? { ...session } : null
   }
@@ -145,9 +147,10 @@ class ChatHistoryService {
   }
 
   public deleteSession(userId: string, sessionId: string): boolean {
+    const targetUserId = userId || 'guest'
     const initialLen = this.sessions.length
     this.sessions = this.sessions.filter(
-      (s) => !(s.id === sessionId && (s.userId === userId || s.userId === 'guest'))
+      (s) => !(s.id === sessionId && s.userId === targetUserId)
     )
     if (this.sessions.length !== initialLen) {
       this.saveSessions()
@@ -157,8 +160,9 @@ class ChatHistoryService {
   }
 
   public renameSession(userId: string, sessionId: string, newTitle: string): ChatSession | null {
+    const targetUserId = userId || 'guest'
     const session = this.sessions.find(
-      (s) => s.id === sessionId && (s.userId === userId || s.userId === 'guest')
+      (s) => s.id === sessionId && s.userId === targetUserId
     )
     if (!session) return null
     session.title = newTitle.trim()

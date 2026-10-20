@@ -11,7 +11,7 @@ import { memoryService } from './services/memoryService.js'
 import { authService } from './services/authService.js'
 import { chatHistoryService } from './services/chatHistoryService.js'
 import { generateAIImage } from './services/imageService.js'
-import { startVideoJob, getVideoJob, PROVIDER_RESTRICTIONS } from './services/videoService.js'
+import { startVideoJob, getVideoJob, syncAndGetVideoJob, PROVIDER_RESTRICTIONS } from './services/videoService.js'
 import { documentService } from './services/documentService.js'
 import { executeTool, AVAILABLE_TOOLS } from './services/toolService.js'
 import { SearchEvidence } from './types.js'
@@ -72,6 +72,17 @@ function getAuthUser(req: express.Request) {
   return null
 }
 
+// Helper to extract isolated client ID (Authenticated user ID or distinct guest ID)
+function getClientId(req: express.Request): string {
+  const user = getAuthUser(req)
+  if (user) return user.id
+  const guestHeader = req.headers['x-guest-id']
+  if (typeof guestHeader === 'string' && guestHeader.trim()) {
+    return `guest:${guestHeader.trim().slice(0, 48)}`
+  }
+  return 'guest:default'
+}
+
 /**
  * Auth Endpoints: Sign Up, Login, Me
  */
@@ -116,24 +127,21 @@ app.get('/api/auth/me', (req, res) => {
  * Chat Sessions & History Endpoints
  */
 app.get('/api/chats', (req, res) => {
-  const user = getAuthUser(req)
-  const userId = user ? user.id : 'guest'
+  const userId = getClientId(req)
   const filterQuery = (req.query.q as string) || ''
   const sessions = chatHistoryService.getUserSessions(userId, filterQuery)
   res.json({ success: true, sessions })
 })
 
 app.post('/api/chats', (req, res) => {
-  const user = getAuthUser(req)
-  const userId = user ? user.id : 'guest'
+  const userId = getClientId(req)
   const { title, firstMessage } = req.body
   const session = chatHistoryService.createSession(userId, firstMessage || title)
   res.json({ success: true, session })
 })
 
 app.get('/api/chats/:id', (req, res) => {
-  const user = getAuthUser(req)
-  const userId = user ? user.id : 'guest'
+  const userId = getClientId(req)
   const session = chatHistoryService.getSession(userId, req.params.id)
   if (!session) {
     res.status(404).json({ error: 'Chat session not found' })
@@ -143,8 +151,7 @@ app.get('/api/chats/:id', (req, res) => {
 })
 
 app.post('/api/chats/:id/messages', (req, res) => {
-  const user = getAuthUser(req)
-  const userId = user ? user.id : 'guest'
+  const userId = getClientId(req)
   const { messages } = req.body
   if (!Array.isArray(messages)) {
     res.status(400).json({ error: 'Messages array is required' })
@@ -155,15 +162,13 @@ app.post('/api/chats/:id/messages', (req, res) => {
 })
 
 app.delete('/api/chats/:id', (req, res) => {
-  const user = getAuthUser(req)
-  const userId = user ? user.id : 'guest'
+  const userId = getClientId(req)
   const deleted = chatHistoryService.deleteSession(userId, req.params.id)
   res.json({ success: deleted })
 })
 
 app.put('/api/chats/:id/title', (req, res) => {
-  const user = getAuthUser(req)
-  const userId = user ? user.id : 'guest'
+  const userId = getClientId(req)
   const { title } = req.body
   if (!title) {
     res.status(400).json({ error: 'Title is required' })
@@ -640,9 +645,9 @@ app.post('/api/generate/video', async (req, res) => {
   }
 })
 
-app.get('/api/generate/video/status/:jobId', (req, res) => {
+app.get('/api/generate/video/status/:jobId', async (req, res) => {
   const { jobId } = req.params
-  const job = getVideoJob(jobId)
+  const job = await syncAndGetVideoJob(jobId)
   if (!job) {
     res.status(404).json({ error: 'Video generation job not found.' })
     return
@@ -650,9 +655,9 @@ app.get('/api/generate/video/status/:jobId', (req, res) => {
   res.json({ success: true, job })
 })
 
-app.get('/api/generate/video/:jobId', (req, res) => {
+app.get('/api/generate/video/:jobId', async (req, res) => {
   const { jobId } = req.params
-  const job = getVideoJob(jobId)
+  const job = await syncAndGetVideoJob(jobId)
   if (!job) {
     res.status(404).json({ error: 'Video generation job not found.' })
     return

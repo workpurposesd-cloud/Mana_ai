@@ -3,6 +3,7 @@ import { configService } from './configService.js'
 import { GeneratedImageMetadata } from '../types.js'
 import fs from 'fs'
 import path from 'path'
+import { fileURLToPath } from 'url'
 
 export interface ImageGenerationOptions {
   prompt: string
@@ -11,17 +12,34 @@ export interface ImageGenerationOptions {
   provider?: 'openai' | 'pollinations'
 }
 
-const MEDIA_DIR = path.resolve(process.cwd(), 'server', 'data', 'media')
+function resolveMediaDir(): string {
+  if (process.env.MEDIA_DIR) return process.env.MEDIA_DIR
+  if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) return path.join('/tmp', 'media')
+  try {
+    if (typeof __dirname !== 'undefined') return path.resolve(__dirname, '../data/media')
+    if (typeof import.meta !== 'undefined' && import.meta.url) {
+      return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data/media')
+    }
+  } catch {}
+  return path.resolve(process.cwd(), 'server', 'data', 'media')
+}
+
+const MEDIA_DIR = resolveMediaDir()
 
 function ensureMediaDir(): string {
   if (!fs.existsSync(MEDIA_DIR)) {
-    fs.mkdirSync(MEDIA_DIR, { recursive: true })
+    try {
+      fs.mkdirSync(MEDIA_DIR, { recursive: true })
+    } catch (e) {
+      console.warn('[ImageService] Failed to create MEDIA_DIR:', e)
+    }
   }
   return MEDIA_DIR
 }
 
 /**
- * Service for generating real AI images using OpenAI DALL-E 3 or Pollinations Flux.1
+ * Service for generating authentic AI images using OpenAI DALL-E 3 or Pollinations Flux.
+ * Never uses fake photos, mock images, or pre-rendered static placeholders.
  */
 export async function generateAIImage(options: ImageGenerationOptions): Promise<GeneratedImageMetadata> {
   const { prompt, aspectRatio = '1:1', quality = 'standard', provider } = options
@@ -121,193 +139,109 @@ export async function generateAIImage(options: ImageGenerationOptions): Promise<
     }
   }
 
-  // 2. Pollinations AI (Zero Key Fallback with Local Buffering & Validation)
-  try {
-    let width = 1024
-    let height = 1024
+  // 2. Pollinations AI (Zero-Key AI Image Diffusion)
+  let width = 1024
+  let height = 1024
 
-    if (aspectRatio === '16:9') {
-      width = 1280
-      height = 720
-    } else if (aspectRatio === '9:16') {
-      width = 720
-      height = 1280
-    }
+  if (aspectRatio === '16:9') {
+    width = 1280
+    height = 720
+  } else if (aspectRatio === '9:16') {
+    width = 720
+    height = 1280
+  }
 
-    // Smart extraction: get just the key subject nouns from complex prompts
-    // "black sports car in a rainy neon city" → "black sports car"
-    // "generate an image of a lion" → "lion"
-    // "photo of a tiger in the jungle" → "tiger"
-    const lowerClean = cleanPrompt.toLowerCase().trim()
-    let rawStripped = lowerClean
-      .replace(/^(generate|create|make|draw|show me|produce|render|give me|make me|i want|i need|please|show)\s+/i, '')
-      .replace(/^(a\s+|an\s+|the\s+)?(realistic|photorealistic|detailed|cinematic|hd|high[- ]quality|beautiful|stunning|4k|professional)\s+/i, '')
-      .replace(/^(photo of|image of|picture of|photo|image|picture)\s+(a\s+|an\s+|the\s+)?/i, '')
-      .replace(/^(a\s+|an\s+|the\s+)/i, '')
-      .trim()
+  // Enhance the prompt for diffusion synthesis
+  let enhancedPrompt = cleanPrompt
+  if (!/(realistic|photorealistic|detailed|cinematic|portrait|quality|rendering)/i.test(cleanPrompt)) {
+    enhancedPrompt = `${cleanPrompt}, highly detailed, cinematic lighting, 8k resolution`
+  }
 
-    // Extract subject: take everything up to first preposition phrase
-    const subjectMatch = rawStripped.match(/^(.*?)(?:\s+(?:in\s+a|in\s+the|at\s+a|at\s+the|with\s+a|with\s+the|on\s+|near\s+|under\s+|during\s+|through\s+|beside\s+|behind\s+|against\s+|around\s+|surrounded\s+|driving\s+|running\s+|flying\s+|standing\s+|sitting\s+).*)$/i)
-    const searchTerms = ((subjectMatch?.[1] || rawStripped).trim()).split(/\s+/).slice(0, 3).join(' ')
+  console.log(`[ImageService] Submitting to Pollinations AI: "${enhancedPrompt.slice(0, 60)}" (${width}x${height})`)
+  const candidateModels = ['flux', 'turbo']
+  let lastErrorMsg = ''
 
-    // Enhance the prompt for AI generators
-    let enhancedPrompt = cleanPrompt
-    if (!/(realistic|photorealistic|detailed|cinematic|portrait|quality)/i.test(cleanPrompt)) {
-      enhancedPrompt = `${cleanPrompt}, high quality, detailed, realistic lighting`
-    }
+  for (const model of candidateModels) {
+    const seed = Math.floor(Math.random() * 1000000)
+    const encodedPrompt = encodeURIComponent(enhancedPrompt)
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=${model}`
 
-    // ── ENGINE 1: Wikimedia Commons — reliable, no rate limits, real photographs ──
-    console.log(`[ImageService] Trying Wikimedia Commons for: "${searchTerms}"`)
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 20000)
+
     try {
-      const wikiUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(searchTerms)}&gsrlimit=12&iiprop=url|size`
-
-      const wikiRes = await fetch(wikiUrl, {
-        headers: { 'User-Agent': 'ManaAI/1.0 (personal assistant)' },
+      const res = await fetch(imageUrl, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'ManaAI/1.0',
+          'Accept': 'image/jpeg,image/png,image/*,*/*',
+        },
       })
+      clearTimeout(timeout)
 
-      if (wikiRes.ok) {
-        const wikiData = await wikiRes.json()
-        const pages = wikiData?.query?.pages ? Object.values(wikiData.query.pages) as any[] : []
+      if (res.status === 402 || res.status === 429) {
+        lastErrorMsg = 'Pollinations AI free tier is currently rate-limited (1 request per 30 seconds per IP). Please wait a moment and try again, or add an OpenAI API Key in Settings for instant DALL-E 3 generations.'
+        console.warn(`[ImageService] Pollinations ${model} rate-limited (${res.status})`)
+        continue
+      }
 
-        // Filter: only real jpg/png images, min 50KB, max 15MB
-        const candidates = pages.filter((p: any) => {
-          const url = p.imageinfo?.[0]?.url || ''
-          const size = p.imageinfo?.[0]?.size || 0
-          return /\.(jpg|jpeg|png)($|\?)/i.test(url) && size > 50000 && size < 15000000
-        })
+      if (!res.ok) {
+        lastErrorMsg = `Pollinations ${model} returned HTTP ${res.status}`
+        console.warn(`[ImageService] ${lastErrorMsg}`)
+        continue
+      }
 
-        if (candidates.length > 0) {
-          // Pick randomly from top 5 results for variety
-          const picked = candidates[Math.floor(Math.random() * Math.min(candidates.length, 5))]
-          const directImgUrl = picked.imageinfo[0].url
+      const buf = Buffer.from(await res.arrayBuffer())
 
-          const imgRes = await fetch(directImgUrl, {
-            headers: { 'User-Agent': 'ManaAI/1.0' },
-          })
-
-          if (imgRes.ok) {
-            const buf = Buffer.from(await imgRes.arrayBuffer())
-            if (buf.length > 20000) {
-              const localFilename = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.jpg`
-              fs.writeFileSync(path.join(MEDIA_DIR, localFilename), buf)
-              console.log(`[ImageService] Wikimedia image cached: ${localFilename} (${buf.length} bytes)`)
-              return {
-                url: `/api/media/${localFilename}`,
-                prompt: cleanPrompt,
-                aspectRatio,
-                quality: quality || 'standard',
-                provider: 'Mana AI High-Fidelity Engine',
-                width,
-                height,
-                createdAt: new Date().toISOString(),
-              }
-            }
-          }
+      if (buf.length < 5000) {
+        const textPreview = buf.toString('utf-8').slice(0, 200)
+        if (textPreview.includes('FREE_LIMIT') || textPreview.includes('limit') || textPreview.startsWith('{')) {
+          lastErrorMsg = 'Pollinations AI free tier limit reached. Please wait 30 seconds and try again, or configure an OpenAI API Key in Settings.'
+          continue
         }
       }
-    } catch (wikiErr: any) {
-      console.warn('[ImageService] Wikimedia engine error:', wikiErr.message)
-    }
 
-    // ── ENGINE 2: Pollinations AI — free AI image generation ──
-    console.log(`[ImageService] Trying Pollinations AI for: "${enhancedPrompt.slice(0, 60)}"`)
-    const candidateModels = ['turbo', 'flux', 'flux-realism']
-    let lastError: any = null
-
-    for (const model of candidateModels) {
-      const seed = Math.floor(Math.random() * 1000000)
-      const encodedPrompt = encodeURIComponent(enhancedPrompt)
-      const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=${model}&private=true`
-
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 25000)
-
+      const localFilename = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.jpg`
       try {
-        const res = await fetch(imageUrl, {
-          signal: controller.signal,
-          headers: {
-            'User-Agent': 'ManaAI/1.0',
-            'Accept': 'image/jpeg,image/png,image/*,*/*',
-          },
-        })
-        clearTimeout(timeout)
-
-        if (res.status === 402) {
-          console.warn(`[ImageService] Pollinations ${model} rate-limited (402), trying next...`)
-          await new Promise(r => setTimeout(r, 1500))
-          continue
-        }
-
-        if (!res.ok) {
-          console.warn(`[ImageService] Pollinations ${model} returned ${res.status}`)
-          continue
-        }
-
-        const buf = Buffer.from(await res.arrayBuffer())
-
-        if (buf.length < 5000) {
-          const str = buf.toString('utf-8')
-          if (str.includes('FREE_LIMIT') || str.includes('Free limit') || str.startsWith('{')) {
-            console.warn(`[ImageService] Pollinations ${model} returned error payload (${buf.length} bytes)`)
-            await new Promise(r => setTimeout(r, 1500))
-            continue
-          }
-          console.warn(`[ImageService] Pollinations ${model} returned small buffer: ${buf.length} bytes`)
-          continue
-        }
-
-        const localFilename = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.jpg`
         fs.writeFileSync(path.join(MEDIA_DIR, localFilename), buf)
-        console.log(`[ImageService] Pollinations ${model} image saved: ${localFilename} (${buf.length} bytes)`)
-
         return {
           url: `/api/media/${localFilename}`,
           prompt: cleanPrompt,
           aspectRatio,
           quality: quality || 'standard',
-          provider: 'Mana AI High-Fidelity Engine',
+          provider: `Pollinations AI (${model.toUpperCase()})`,
           width,
           height,
           createdAt: new Date().toISOString(),
         }
-      } catch (fetchErr: any) {
-        clearTimeout(timeout)
-        lastError = fetchErr
-        console.warn(`[ImageService] Pollinations ${model} fetch failed:`, fetchErr.message)
+      } catch (writeErr) {
+        console.warn('[ImageService] Failed to cache locally, returning direct data URI:', writeErr)
+        // If filesystem write fails (e.g. strict readonly), return data URI
+        const base64Data = buf.toString('base64')
+        return {
+          url: `data:image/jpeg;base64,${base64Data}`,
+          prompt: cleanPrompt,
+          aspectRatio,
+          quality: quality || 'standard',
+          provider: `Pollinations AI (${model.toUpperCase()})`,
+          width,
+          height,
+          createdAt: new Date().toISOString(),
+        }
       }
-    }
-
-    // ── ENGINE 3: Local built-in image library (guaranteed fallback) ──
-    console.log('[ImageService] Using local built-in library as final fallback')
-    const lowerPrompt = cleanPrompt.toLowerCase()
-    let localSample = 'default.jpg'
-
-    if (lowerPrompt.includes('cat') || lowerPrompt.includes('kitten') || lowerPrompt.includes('feline')) {
-      localSample = 'cat.jpg'
-    } else if (lowerPrompt.includes('dog') || lowerPrompt.includes('puppy') || lowerPrompt.includes('canine')) {
-      localSample = 'dog.jpg'
-    }
-
-    const samplePath = path.join(MEDIA_DIR, localSample)
-    if (fs.existsSync(samplePath)) {
-      const localFilename = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.jpg`
-      fs.copyFileSync(samplePath, path.join(MEDIA_DIR, localFilename))
-      console.log(`[ImageService] Served local library image: ${localSample}`)
-      return {
-        url: `/api/media/${localFilename}`,
-        prompt: cleanPrompt,
-        aspectRatio,
-        quality: quality || 'standard',
-        provider: 'Mana AI High-Fidelity Engine',
-        width,
-        height,
-        createdAt: new Date().toISOString(),
+    } catch (fetchErr: any) {
+      clearTimeout(timeout)
+      if (fetchErr.name === 'AbortError') {
+        lastErrorMsg = 'Image generation request timed out after 20 seconds. The model cluster is under high load. Please try again.'
+      } else {
+        lastErrorMsg = fetchErr.message || 'Network error contacting image generation cluster.'
       }
+      console.warn(`[ImageService] Pollinations ${model} fetch failed:`, lastErrorMsg)
     }
-
-    throw lastError || new Error('Image generation is temporarily unavailable. Please try again in a moment.')
-  } catch (err: any) {
-    console.error('[ImageService] Generation error:', err.message)
-    throw new Error(err.message || 'Image generation failed. Please try again.')
   }
+
+  throw new Error(
+    lastErrorMsg ||
+      'AI Image generation is temporarily busy or rate-limited. Please retry in 30 seconds, or provide an OpenAI API key in Settings to use DALL-E 3 directly.'
+  )
 }

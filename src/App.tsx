@@ -104,10 +104,18 @@ export const App: React.FC = () => {
     currentSessionIdRef.current = currentSessionId
   }, [currentSessionId])
 
-  // Helper for auth headers
+  // Helper for auth and client isolation headers
   const getAuthHeaders = useCallback((): HeadersInit => {
     const token = authToken || localStorage.getItem('mana_auth_token')
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    let guestId = localStorage.getItem('mana_guest_id')
+    if (!guestId) {
+      guestId = `g-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      localStorage.setItem('mana_guest_id', guestId)
+    }
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'x-guest-id': guestId,
+    }
     if (token) {
       headers['Authorization'] = `Bearer ${token}`
     }
@@ -929,6 +937,18 @@ export const App: React.FC = () => {
     }
   }
 
+  const handleRegenerateChat = (assistantMsgId: string) => {
+    if (isGenerating) return
+    const idx = messages.findIndex((m) => m.id === assistantMsgId)
+    if (idx > 0) {
+      const userPrompt = messages[idx - 1]?.content
+      if (userPrompt) {
+        setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId))
+        handleSendMessage(userPrompt)
+      }
+    }
+  }
+
   const hasMessages = messages.length > 0
 
   return (
@@ -995,6 +1015,7 @@ export const App: React.FC = () => {
                   onRegenerateVideo={(prompt, ratio, dur) =>
                     handleGenerateVideo(prompt, ratio as any, dur)
                   }
+                  onRegenerateChat={handleRegenerateChat}
                   onOpenSettings={() => setIsSettingsOpen(true)}
                 />
               ))}

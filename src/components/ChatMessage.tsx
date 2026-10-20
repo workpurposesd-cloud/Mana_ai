@@ -14,6 +14,7 @@ interface ChatMessageProps {
   onPreviewImage?: (image: GeneratedImageMetadata) => void
   onRegenerateImage?: (prompt: string, aspectRatio?: string, quality?: string) => void
   onRegenerateVideo?: (prompt: string, aspectRatio?: string, duration?: number) => void
+  onRegenerateChat?: (messageId: string) => void
   onOpenSettings?: () => void
 }
 
@@ -26,6 +27,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   onPreviewImage,
   onRegenerateImage,
   onRegenerateVideo,
+  onRegenerateChat,
   onOpenSettings,
 }) => {
   const isUser = message.role === 'user'
@@ -261,6 +263,17 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
               {copiedAnswer ? <Check size={13} color="#4ade80" /> : <Copy size={13} />}
             </button>
 
+            {/* Regenerate Chat Response */}
+            {onRegenerateChat && (
+              <button
+                className="feedback-btn"
+                onClick={() => onRegenerateChat(message.id)}
+                title="Regenerate this answer"
+              >
+                <RefreshCw size={13} />
+              </button>
+            )}
+
             {/* Feedback Thumbs */}
             <button
               className={`feedback-btn ${feedbackGiven === 'thumbs_up' ? 'active-up' : ''}`}
@@ -365,6 +378,10 @@ const TextMarkdownBlock: React.FC<{ text: string }> = ({ text }) => {
         const trimmed = para.trim()
         if (!trimmed) return null
 
+        // Headings
+        if (trimmed.startsWith('#### ')) {
+          return <h4 key={pIdx}>{renderInlineMarkdown(trimmed.replace(/^####\s+/, ''))}</h4>
+        }
         if (trimmed.startsWith('### ')) {
           return <h3 key={pIdx}>{renderInlineMarkdown(trimmed.replace(/^###\s+/, ''))}</h3>
         }
@@ -375,40 +392,169 @@ const TextMarkdownBlock: React.FC<{ text: string }> = ({ text }) => {
           return <h1 key={pIdx}>{renderInlineMarkdown(trimmed.replace(/^#\s+/, ''))}</h1>
         }
 
+        // Blockquotes
+        if (trimmed.startsWith('>')) {
+          const quoteLines = trimmed.split('\n').map((l) => l.replace(/^>\s*/, ''))
+          return (
+            <blockquote
+              key={pIdx}
+              style={{
+                borderLeft: '3px solid var(--accent-purple, #8b5cf6)',
+                paddingLeft: '0.8rem',
+                margin: '0.6rem 0',
+                color: '#cbd5e1',
+                fontStyle: 'italic',
+              }}
+            >
+              {quoteLines.map((ql, qIdx) => (
+                <React.Fragment key={qIdx}>
+                  {renderInlineMarkdown(ql)}
+                  {qIdx < quoteLines.length - 1 && <br />}
+                </React.Fragment>
+              ))}
+            </blockquote>
+          )
+        }
+
+        // Markdown Table: lines starting and ending with |
+        const rawLines = trimmed.split('\n').map((l) => l.trim())
+        const isTable =
+          rawLines.length >= 2 &&
+          rawLines[0].startsWith('|') &&
+          rawLines[0].endsWith('|') &&
+          rawLines[1].includes('---')
+
+        if (isTable) {
+          const headerCells = rawLines[0]
+            .split('|')
+            .slice(1, -1)
+            .map((c) => c.trim())
+          const dataRows = rawLines
+            .slice(2)
+            .filter((l) => l.startsWith('|') && l.endsWith('|'))
+            .map((row) =>
+              row
+                .split('|')
+                .slice(1, -1)
+                .map((c) => c.trim())
+            )
+
+          return (
+            <div
+              key={pIdx}
+              style={{
+                overflowX: 'auto',
+                margin: '0.8rem 0',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '8px',
+              }}
+            >
+              <table
+                style={{
+                  width: '100%',
+                  borderCollapse: 'collapse',
+                  fontSize: '0.9rem',
+                }}
+              >
+                <thead>
+                  <tr style={{ background: 'rgba(255, 255, 255, 0.05)' }}>
+                    {headerCells.map((h, hIdx) => (
+                      <th
+                        key={hIdx}
+                        style={{
+                          padding: '8px 12px',
+                          textAlign: 'left',
+                          borderBottom: '1px solid rgba(255, 255, 255, 0.15)',
+                          fontWeight: 600,
+                          color: '#e2e8f0',
+                        }}
+                      >
+                        {renderInlineMarkdown(h)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {dataRows.map((row, rIdx) => (
+                    <tr
+                      key={rIdx}
+                      style={{
+                        borderBottom:
+                          rIdx < dataRows.length - 1
+                            ? '1px solid rgba(255, 255, 255, 0.05)'
+                            : 'none',
+                      }}
+                    >
+                      {row.map((cell, cIdx) => (
+                        <td
+                          key={cIdx}
+                          style={{
+                            padding: '8px 12px',
+                            color: '#cbd5e1',
+                          }}
+                        >
+                          {renderInlineMarkdown(cell)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        }
+
+        // Parse individual lines within the paragraph to handle mixed lists cleanly
+        const parsedNodes: React.ReactNode[] = []
+        let currentBulletItems: React.ReactNode[] = []
+        let currentNumberedItems: React.ReactNode[] = []
+
+        const flushLists = (keyPrefix: string) => {
+          if (currentBulletItems.length > 0) {
+            parsedNodes.push(
+              <ul key={`${keyPrefix}-ul`} style={{ margin: '0.4rem 0', paddingLeft: '1.4rem' }}>
+                {currentBulletItems.map((item, i) => (
+                  <li key={i}>{item}</li>
+                ))}
+              </ul>
+            )
+            currentBulletItems = []
+          }
+          if (currentNumberedItems.length > 0) {
+            parsedNodes.push(
+              <ol key={`${keyPrefix}-ol`} style={{ margin: '0.4rem 0', paddingLeft: '1.4rem' }}>
+                {currentNumberedItems.map((item, i) => (
+                  <li key={i}>{item}</li>
+                ))}
+              </ol>
+            )
+            currentNumberedItems = []
+          }
+        }
+
         const lines = trimmed.split('\n')
-        const isBulletList = lines.every((line) => /^[-•*]\s+/.test(line.trim()))
-        const isNumberedList = lines.every((line) => /^\d+\.\s+/.test(line.trim()))
+        lines.forEach((line, lIdx) => {
+          const lTrim = line.trim()
+          if (/^[-•*]\s+/.test(lTrim)) {
+            if (currentNumberedItems.length > 0) flushLists(`line-${lIdx}`)
+            currentBulletItems.push(renderInlineMarkdown(lTrim.replace(/^[-•*]\s+/, '')))
+          } else if (/^\d+\.\s+/.test(lTrim)) {
+            if (currentBulletItems.length > 0) flushLists(`line-${lIdx}`)
+            currentNumberedItems.push(renderInlineMarkdown(lTrim.replace(/^\d+\.\s+/, '')))
+          } else {
+            flushLists(`line-${lIdx}`)
+            if (lTrim.length > 0) {
+              parsedNodes.push(
+                <p key={`p-${lIdx}`} style={{ margin: '0.35rem 0' }}>
+                  {renderInlineMarkdown(line)}
+                </p>
+              )
+            }
+          }
+        })
+        flushLists('end')
 
-        if (isBulletList) {
-          return (
-            <ul key={pIdx}>
-              {lines.map((line, lIdx) => (
-                <li key={lIdx}>{renderInlineMarkdown(line.replace(/^[-•*]\s+/, ''))}</li>
-              ))}
-            </ul>
-          )
-        }
-
-        if (isNumberedList) {
-          return (
-            <ol key={pIdx}>
-              {lines.map((line, lIdx) => (
-                <li key={lIdx}>{renderInlineMarkdown(line.replace(/^\d+\.\s+/, ''))}</li>
-              ))}
-            </ol>
-          )
-        }
-
-        return (
-          <p key={pIdx}>
-            {lines.map((line, lIdx) => (
-              <React.Fragment key={lIdx}>
-                {renderInlineMarkdown(line)}
-                {lIdx < lines.length - 1 && <br />}
-              </React.Fragment>
-            ))}
-          </p>
-        )
+        return <React.Fragment key={pIdx}>{parsedNodes}</React.Fragment>
       })}
     </>
   )
@@ -416,7 +562,8 @@ const TextMarkdownBlock: React.FC<{ text: string }> = ({ text }) => {
 
 function renderInlineMarkdown(str: string): React.ReactNode[] {
   const elements: React.ReactNode[] = []
-  const regex = /(\[([^\]]+)\]\(([^)]+)\)|`([^`]+)`|\*\*([^*]+)\*\*)/g
+  // Matches links, inline code, bold, italics
+  const regex = /(\[([^\]]+)\]\(([^)]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|\*([^*]+)\*)/g
   let lastIndex = 0
   let match: RegExpExecArray | null
 
@@ -426,6 +573,7 @@ function renderInlineMarkdown(str: string): React.ReactNode[] {
     }
 
     if (match[2] && match[3]) {
+      // Link
       elements.push(
         <a key={`link-${match.index}`} href={match[3]} target="_blank" rel="noopener noreferrer">
           {match[2]}
@@ -433,9 +581,14 @@ function renderInlineMarkdown(str: string): React.ReactNode[] {
         </a>
       )
     } else if (match[4]) {
+      // Inline Code
       elements.push(<code key={`code-${match.index}`}>{match[4]}</code>)
     } else if (match[5]) {
+      // Bold
       elements.push(<strong key={`bold-${match.index}`}>{match[5]}</strong>)
+    } else if (match[6]) {
+      // Italic
+      elements.push(<em key={`italic-${match.index}`}>{match[6]}</em>)
     }
 
     lastIndex = match.index + match[0].length
