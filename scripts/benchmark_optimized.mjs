@@ -19,7 +19,7 @@ async function measurePrompt(testItem) {
   let chunkCount = 0
 
   try {
-    const res = await fetch(`${BASE_URL}/api/chat/stream`, {
+    const res = await fetch(`${BASE_URL}/.netlify/functions/chat-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: testItem.prompt }),

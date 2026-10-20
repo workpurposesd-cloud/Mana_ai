@@ -798,7 +798,12 @@ export const App: React.FC = () => {
     abortControllerRef.current = controller
 
     try {
-      const response = await fetch('/api/chat/stream', {
+      const streamEndpoint =
+        typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+          ? '/.netlify/functions/chat-stream'
+          : '/api/chat/stream'
+
+      const response = await fetch(streamEndpoint, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({

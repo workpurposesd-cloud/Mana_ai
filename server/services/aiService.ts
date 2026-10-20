@@ -24,12 +24,13 @@ function getGeminiClient(apiKey: string): GoogleGenerativeAI {
 function getOpenAIClient(apiKey: string, baseURL?: string): OpenAI {
   const cacheKey = `${apiKey}:${baseURL || 'default'}`
   if (!openAIClientCache.has(cacheKey)) {
+    const isFreePollinations = baseURL?.includes('pollinations')
     openAIClientCache.set(
       cacheKey,
       new OpenAI({
         apiKey,
         baseURL,
-        timeout: 25000,
+        timeout: isFreePollinations ? 11000 : 25000,
         maxRetries: 1,
       })
     )
