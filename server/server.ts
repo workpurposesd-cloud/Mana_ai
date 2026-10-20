@@ -237,6 +237,24 @@ app.get('/api/health', (_req, res) => {
   })
 })
 
+app.get('/api/test-blobs', async (_req, res) => {
+  try {
+    const blobsStore = dbService.getBlobsStore()
+    if (!blobsStore) {
+      res.json({ success: false, reason: 'Blobs store is null' })
+      return
+    }
+    const testKey = `test-${Date.now()}`
+    const testData = { hello: 'world', timestamp: Date.now() }
+    await blobsStore.setJSON(testKey, testData)
+    const readBack = await blobsStore.get(testKey, { type: 'json', consistency: 'strong' })
+    await blobsStore.delete(testKey)
+    res.json({ success: true, written: testData, readBack })
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message, stack: err.stack })
+  }
+})
+
 /**
  * Get active configuration (API keys masked)
  */
