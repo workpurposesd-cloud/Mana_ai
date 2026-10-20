@@ -13,11 +13,19 @@ export interface ChatSession {
 class ChatHistoryService {
   private sessions: ChatSession[] = []
 
+  private lastRefreshTime: number = 0
+  private readonly REFRESH_TTL_MS: number = 4000 // 4s in-memory TTL to avoid repeated Blobs latency
+
   constructor() {
     this.sessions = dbService.getSync<ChatSession[]>('chats', [])
   }
 
-  public async refreshFromDb(): Promise<void> {
+  public async refreshFromDb(force = false): Promise<void> {
+    const now = Date.now()
+    if (!force && now - this.lastRefreshTime < this.REFRESH_TTL_MS) {
+      return
+    }
+    this.lastRefreshTime = now
     try {
       const stored = await dbService.getFresh<ChatSession[]>('chats', this.sessions)
       if (Array.isArray(stored) && stored.length > 0) {
@@ -37,7 +45,12 @@ class ChatHistoryService {
     await dbService.set('chats', this.sessions)
   }
 
-  public getUserSessions(userId: string, filterQuery?: string): Omit<ChatSession, 'messages'>[] {
+  public getUserSessions(
+    userId: string,
+    filterQuery?: string,
+    limit = 50,
+    offset = 0
+  ): { sessions: Omit<ChatSession, 'messages'>[]; total: number; hasMore: boolean } {
     const targetUserId = userId || 'guest'
     let list = this.sessions.filter((s) => s.userId === targetUserId)
 
@@ -52,7 +65,13 @@ class ChatHistoryService {
     // Sort newest first
     list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
 
-    return list.map(({ messages, ...rest }) => rest)
+    const total = list.length
+    const paginated = list.slice(offset, offset + limit).map(({ messages, ...rest }) => rest)
+    return {
+      sessions: paginated,
+      total,
+      hasMore: offset + limit < total,
+    }
   }
 
   public getSession(userId: string, sessionId: string): ChatSession | null {

@@ -2,7 +2,40 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import OpenAI from 'openai'
 import { AppConfig, SearchEvidence, MemoryItem } from '../types.js'
 import { documentService, DocumentSearchResult } from './documentService.js'
+import { GoogleGenerativeAI } from '@google/generative-ai'
+import OpenAI from 'openai'
+import { AppConfig, SearchEvidence, MemoryItem } from '../types.js'
+import { documentService, DocumentSearchResult } from './documentService.js'
 import { executeTool, ToolResult } from './toolService.js'
+import { determineTaskTier, selectModelForTask } from './modelRouter.js'
+import { optimizeConversationContext } from './contextManager.js'
+import { classifyIntent } from './intentClassifier.js'
+
+const geminiClientCache = new Map<string, GoogleGenerativeAI>()
+const openAIClientCache = new Map<string, OpenAI>()
+
+function getGeminiClient(apiKey: string): GoogleGenerativeAI {
+  if (!geminiClientCache.has(apiKey)) {
+    geminiClientCache.set(apiKey, new GoogleGenerativeAI(apiKey))
+  }
+  return geminiClientCache.get(apiKey)!
+}
+
+function getOpenAIClient(apiKey: string, baseURL?: string): OpenAI {
+  const cacheKey = `${apiKey}:${baseURL || 'default'}`
+  if (!openAIClientCache.has(cacheKey)) {
+    openAIClientCache.set(
+      cacheKey,
+      new OpenAI({
+        apiKey,
+        baseURL,
+        timeout: 25000,
+        maxRetries: 1,
+      })
+    )
+  }
+  return openAIClientCache.get(cacheKey)!
+}
 
 export interface GenerationOptions {
   prompt: string
@@ -63,19 +96,29 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
     } catch {}
   }
 
-  const systemPrompt = buildSystemPrompt(config, searchEvidence, memories, isDetailRequested, reasoningMode, documentMatches)
-  const fullPromptWithEvidence = buildUserPromptWithEvidence(prompt, searchEvidence, memories, documentMatches, toolResults)
+  // 1. Optimize conversation context & token budget
+  const optimized = optimizeConversationContext(history, memories, 2500)
+  const effectiveHistory = optimized.sanitizedHistory
 
-  // 1. Google Gemini (Pro Human-Level Thinking with Full Multi-Turn Chat History)
+  // 2. Classify intent & task tier for model routing
+  const conversationContext = effectiveHistory.slice(-4).map((h) => `${h.role}: ${h.content}`)
+  const intent = classifyIntent(prompt, conversationContext)
+  const taskTier = determineTaskTier(prompt, intent, reasoningMode)
+  const modelSelection = selectModelForTask(taskTier, config, intent)
+
+  const systemPrompt = buildSystemPrompt(config, searchEvidence, optimized.memoriesUsed, isDetailRequested, reasoningMode, documentMatches)
+  const fullPromptWithEvidence = buildUserPromptWithEvidence(prompt, searchEvidence, optimized.memoriesUsed, documentMatches, toolResults, optimized.historySummary)
+
+  // 1. Google Gemini (Fast or Reasoning Tier)
   const activeGeminiKey = config.geminiApiKey || process.env.GEMINI_API_KEY
-  if (activeGeminiKey && (config.aiProvider === 'gemini' || config.aiProvider === 'builtin' || !config.aiProvider)) {
+  if (activeGeminiKey && (modelSelection.provider === 'gemini' || config.aiProvider === 'gemini' || config.aiProvider === 'builtin' || !config.aiProvider)) {
     try {
       return await generateGeminiStream(
         activeGeminiKey,
-        config.modelName || 'gemini-1.5-flash',
+        modelSelection.modelName || 'gemini-1.5-flash',
         systemPrompt,
         fullPromptWithEvidence,
-        history,
+        effectiveHistory,
         onToken
       )
     } catch (err: any) {
@@ -83,16 +126,16 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
     }
   }
 
-  // 2. OpenAI / Groq if configured
-  if (config.aiProvider === 'openai' && config.openaiApiKey) {
+  // 2. OpenAI if configured
+  if (config.openaiApiKey && (modelSelection.provider === 'openai' || config.aiProvider === 'openai')) {
     try {
       return await generateOpenAIStream(
         config.openaiApiKey,
-        config.modelName || 'gpt-4o-mini',
+        modelSelection.modelName || 'gpt-4o-mini',
         undefined,
         systemPrompt,
         fullPromptWithEvidence,
-        history,
+        effectiveHistory,
         onToken
       )
     } catch (err: any) {
@@ -100,15 +143,16 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
     }
   }
 
-  if (config.aiProvider === 'groq' && config.groqApiKey) {
+  // 3. Groq (Ultra-Fast) if configured
+  if (config.groqApiKey && (modelSelection.provider === 'groq' || config.aiProvider === 'groq')) {
     try {
       return await generateOpenAIStream(
         config.groqApiKey,
-        config.modelName || 'llama-3.1-8b-instant',
+        modelSelection.modelName || 'llama-3.1-8b-instant',
         'https://api.groq.com/openai/v1',
         systemPrompt,
         fullPromptWithEvidence,
-        history,
+        effectiveHistory,
         onToken
       )
     } catch (err: any) {
@@ -116,27 +160,30 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
     }
   }
 
-  // 3. For authentic conversational Teluglish, Andhra village friend banter, and chit-chat:
-  // Deliver authentic local Andhra Pradesh village personality directly to avoid third-party LLM
-  // translation hallucinations (e.g. "Bottakokane") and external 429 rate limits.
+  // 4. Fast Tier or Telugu Village Friend Banter:
+  // If task is fast/conversational, deliver authentic local Andhra Pradesh village personality
+  // directly for instantaneous TTFT and zero external rate limits.
   const isConversationalTeluglish =
+    taskTier === 'fast' ||
+    intent.category === 'conversational' ||
     /[\u0C00-\u0C7F]/.test(cleanPrompt) ||
     /\b(nenu inka bathike unna|inka bathike unna|bathike unna|bathiki unna|nenu unna|chachipoledu|chavaledu|em chestunnav|em chesthunnav|em peekuthunnav|ela unnav|ela unnaru|bavunnava|bagunnava|kushalama|thinnava|tinnava|bhojanam|bore kodutondi|bore kottiddi|chala bore|bore mama|nidra vastondi|padukuntunna|nidra potunna|ippude lecha|lecha mama|cheppu mama|cheppu ra|orey mama|enti ra mama|em scene|em sangathi|ayyo ra|lite theesko|dobbey|po ra|musukoni|sare mama|avuna mama|nijama|kaburlu|sollu|visugu|mood ledu|mood off|tension ga undi|kashtam ga undi|hello hay|hello hey|wassup|what's up|whats up|how are you|how r u|i'm bored|im bored|teach me (common )?(english )?(bad|swear|curse) words|puka|chetha na kodaka|lamidi lodaka|bokka|dunnapotha|waste fellow|health problem|chest pain|hospital|financial|loan|emi|git push|netlify|java|mama|orey|arey|babu|saami|marchipoya|delete chesa|commit cheyyakunda|talk (only )?in english|speak (only )?in english)\b/i.test(cleanPrompt)
 
   if (isConversationalTeluglish && (!activeGeminiKey && !config.openaiApiKey && !config.groqApiKey)) {
     return await generateContextualSmartResponse(
       prompt,
-      history,
+      effectiveHistory,
       searchEvidence,
-      memories,
+      optimized.memoriesUsed,
       isDetailRequested,
       documentMatches,
       toolResults,
+      optimized.historySummary,
       onToken
     )
   }
 
-  // 4. Built-in Smart AI Chat Engine (Free, multi-turn, authentic AI answers with zero keys required)
+  // 5. Built-in Smart AI Chat Engine (Free, multi-turn, authentic AI answers with zero keys required)
   try {
     return await generateOpenAIStream(
       'free-mana-key',
@@ -144,22 +191,23 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
       'https://text.pollinations.ai/openai',
       systemPrompt,
       fullPromptWithEvidence,
-      history,
+      effectiveHistory,
       onToken
     )
   } catch (err: any) {
     console.warn('[AIService] Free smart AI chat engine failed or offline, falling back to local synthesizer:', err.message)
   }
 
-  // 4. Offline Multi-Turn Local Synthesizer Fallback
+  // 6. Offline Multi-Turn Local Synthesizer Fallback
   return await generateContextualSmartResponse(
     prompt,
-    history,
+    effectiveHistory,
     searchEvidence,
-    memories,
+    optimized.memoriesUsed,
     isDetailRequested,
     documentMatches,
     toolResults,
+    optimized.historySummary,
     onToken
   )
 }
@@ -175,7 +223,7 @@ async function generateGeminiStream(
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
   onToken?: (token: string) => void
 ): Promise<string> {
-  const genAI = new GoogleGenerativeAI(apiKey)
+  const genAI = getGeminiClient(apiKey)
   const candidateModels = Array.from(new Set([
     modelName,
     'gemini-1.5-flash',
@@ -257,7 +305,7 @@ async function generateOpenAIStream(
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
   onToken?: (token: string) => void
 ): Promise<string> {
-  const openai = new OpenAI({ apiKey, baseURL, timeout: 30000, maxRetries: 1 })
+  const openai = getOpenAIClient(apiKey, baseURL)
 
   const messages: any[] = [{ role: 'system', content: systemPrompt }]
   for (const h of (history || []).slice(-16)) {
@@ -298,6 +346,7 @@ async function generateContextualSmartResponse(
   isDetailRequested?: boolean,
   documentMatches: DocumentSearchResult[] = [],
   toolResults: ToolResult[] = [],
+  historySummary?: string,
   onToken?: (token: string) => void
 ): Promise<string> {
   const clean = prompt.trim()
@@ -1202,9 +1251,14 @@ function buildUserPromptWithEvidence(
   evidence?: SearchEvidence,
   memories: MemoryItem[] = [],
   documentMatches: DocumentSearchResult[] = [],
-  toolResults: ToolResult[] = []
+  toolResults: ToolResult[] = [],
+  historySummary?: string
 ): string {
   let text = ''
+
+  if (historySummary) {
+    text += `${historySummary}\n\n`
+  }
 
   if (memories.length > 0) {
     text += `[Active User Memories: ${memories.map((m) => `${m.key}=${m.value}`).join('; ')}]\n\n`

@@ -169,9 +169,11 @@ app.get('/api/auth/me', (req, res) => {
 app.get('/api/chats', async (req, res) => {
   const userId = getClientId(req)
   const filterQuery = (req.query.q as string) || ''
+  const limit = Math.min(100, Math.max(1, parseInt((req.query.limit as string) || '50', 10)))
+  const offset = Math.max(0, parseInt((req.query.offset as string) || '0', 10))
   await chatHistoryService.refreshFromDb()
-  const sessions = chatHistoryService.getUserSessions(userId, filterQuery)
-  res.json({ success: true, sessions })
+  const result = chatHistoryService.getUserSessions(userId, filterQuery, limit, offset)
+  res.json({ success: true, sessions: result.sessions, total: result.total, hasMore: result.hasMore })
 })
 
 app.post('/api/chats', async (req, res) => {
@@ -566,7 +568,10 @@ app.post('/api/chat/stream', async (req, res) => {
     })
 
     // Step 3: Stream AI response with full multi-turn history, memories, reasoning, & documents
+    const streamStart = Date.now()
+    let firstTokenTime: number | null = null
     let accumulatedContent = ''
+
     await generateAIResponse({
       prompt,
       history,
@@ -577,12 +582,17 @@ app.post('/api/chat/stream', async (req, res) => {
       reasoningMode,
       documentMatches,
       onToken: (token: string) => {
+        if (!firstTokenTime) {
+          firstTokenTime = Date.now() - streamStart
+        }
         accumulatedContent += token
         sendEvent('token', { token })
       },
     })
 
-    // Step 4: Complete event
+    const totalDuration = Date.now() - streamStart
+
+    // Step 4: Complete event with timing stats
     sendEvent('done', {
       content: accumulatedContent,
       searchEvidence,
@@ -591,6 +601,10 @@ app.post('/api/chat/stream', async (req, res) => {
       memoriesUsed: relevantMemories.map((m) => m.key),
       documentsUsed: documentMatches.map((d) => d.docTitle),
       reasoningMode,
+      timings: {
+        ttftMs: firstTokenTime || totalDuration,
+        totalMs: totalDuration,
+      },
     })
 
     res.end()

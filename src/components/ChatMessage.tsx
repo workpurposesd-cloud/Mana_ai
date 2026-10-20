@@ -81,9 +81,28 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
           </div>
         )}
 
-        {/* Metadata badges (Reasoning mode & Knowledge documents cited) */}
-        {!isUser && (message.reasoningMode === 'thinking' || (message.documentsUsed && message.documentsUsed.length > 0)) && (
+        {/* Metadata badges (Reasoning mode & Knowledge documents cited & Speed) */}
+        {!isUser && (message.reasoningMode === 'thinking' || (message.documentsUsed && message.documentsUsed.length > 0) || message.timings?.ttftMs) && (
           <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+            {message.timings?.ttftMs && (
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  background: 'rgba(34, 197, 94, 0.12)',
+                  border: '1px solid rgba(34, 197, 94, 0.3)',
+                  color: '#86efac',
+                  fontWeight: 500,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+                title={`Time to first token: ${message.timings.ttftMs}ms${message.timings.totalMs ? ` | Total: ${message.timings.totalMs}ms` : ''}`}
+              >
+                ⚡ {message.timings.ttftMs}ms
+              </span>
+            )}
             {message.reasoningMode === 'thinking' && (
               <span
                 style={{

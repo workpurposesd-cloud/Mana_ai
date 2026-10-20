@@ -92,6 +92,10 @@ export interface Message {
   feedback?: 'thumbs_up' | 'thumbs_down'
   reasoningMode?: 'fast' | 'thinking'
   documentsUsed?: string[]
+  timings?: {
+    ttftMs?: number
+    totalMs?: number
+  }
 }
 
 export interface DocumentMetadata {

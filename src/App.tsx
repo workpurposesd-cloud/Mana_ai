@@ -526,7 +526,7 @@ export const App: React.FC = () => {
     customQuality?: 'standard' | 'hd'
   ) => {
     const promptToSend = (customPrompt || input).trim()
-    if (!promptToSend || isGenerating) return
+    if (!promptToSend) return
 
     setInput('')
     if (window.innerWidth < 820) {
@@ -560,7 +560,6 @@ export const App: React.FC = () => {
 
     const nextMessages = [...messages, userMessage, assistantMessage]
     setMessages(nextMessages)
-    setIsGenerating(true)
 
     try {
       const res = await safeApiFetch<{ image: GeneratedImageMetadata }>('/api/generate/image', {
@@ -605,8 +604,6 @@ export const App: React.FC = () => {
             : m
         )
       )
-    } finally {
-      setIsGenerating(false)
     }
   }
 
@@ -616,7 +613,7 @@ export const App: React.FC = () => {
     customDuration?: number
   ) => {
     const promptToSend = (customPrompt || input).trim()
-    if (!promptToSend || isGenerating) return
+    if (!promptToSend) return
 
     setInput('')
     if (window.innerWidth < 820) {
@@ -650,7 +647,6 @@ export const App: React.FC = () => {
 
     const nextMessages = [...messages, userMessage, assistantMessage]
     setMessages(nextMessages)
-    setIsGenerating(true)
 
     try {
       const res = await safeApiFetch<{ job: VideoJobMetadata }>('/api/generate/video', {
@@ -680,7 +676,6 @@ export const App: React.FC = () => {
       )
 
       if (initialJob.status === 'completed' || initialJob.status === 'failed') {
-        setIsGenerating(false)
         saveSessionMessages(activeSessionId, [
           ...nextMessages.filter((m) => m.id !== assistantId),
           { ...assistantMessage, isGeneratingMedia: false, video: initialJob },
@@ -708,7 +703,6 @@ export const App: React.FC = () => {
 
             if (currentJob.status === 'completed' || currentJob.status === 'failed') {
               clearInterval(pollInterval)
-              setIsGenerating(false)
               saveSessionMessages(activeSessionId, [
                 ...nextMessages.filter((m) => m.id !== assistantId),
                 { ...assistantMessage, isGeneratingMedia: false, video: currentJob },
@@ -732,7 +726,6 @@ export const App: React.FC = () => {
             : m
         )
       )
-      setIsGenerating(false)
     }
   }
 
@@ -795,10 +788,10 @@ export const App: React.FC = () => {
     setMessages(nextMessages)
     setIsGenerating(true)
 
-    // Pass last 12 turns of history for deep human-level context
-    const history = messages.slice(-12).map((m) => ({
+    // Sliding context window: send last 8 turns capped at 500 characters
+    const history = messages.slice(-8).map((m) => ({
       role: m.role,
-      content: m.content,
+      content: m.content.length > 500 ? m.content.slice(0, 500) + '...' : m.content,
     }))
 
     const controller = new AbortController()
@@ -895,6 +888,9 @@ export const App: React.FC = () => {
                   target.isStreaming = false
                   target.isSearching = false
                   target.reasoningMode = parsed.reasoningMode
+                  if (parsed.timings) {
+                    target.timings = parsed.timings
+                  }
                   if (parsed.documentsUsed) {
                     target.documentsUsed = parsed.documentsUsed
                   }
