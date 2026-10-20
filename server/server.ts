@@ -295,10 +295,32 @@ app.post('/api/config', (req, res) => {
  */
 app.get('/api/ollama/status', async (req, res) => {
   const config = configService.getConfig()
-  const baseUrl = (req.query.baseUrl as string) || config.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434'
+  const baseUrl =
+    (req.query.baseUrl as string) ||
+    config.ollamaBaseUrl ||
+    process.env.AI_API_BASE_URL ||
+    process.env.OLLAMA_BASE_URL ||
+    'http://127.0.0.1:11434'
+
+  const isCloudHost = Boolean(process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME)
+  const isLocalhostUrl = baseUrl.includes('127.0.0.1') || baseUrl.includes('localhost')
+
+  if (isCloudHost && isLocalhostUrl) {
+    res.json({
+      connected: false,
+      baseUrl,
+      models: [],
+      isCloudHost: true,
+      error: 'Netlify cloud cannot reach local 127.0.0.1 Ollama without a cloud endpoint. Set AI_API_BASE_URL in Netlify environment variables.',
+      activeModel: config.ollamaModel || config.modelName || process.env.OLLAMA_MODEL || 'qwen2.5:3b',
+    })
+    return
+  }
+
   const status = await checkOllamaStatus(baseUrl)
   res.json({
     ...status,
+    isCloudHost,
     activeModel: config.ollamaModel || config.modelName || process.env.OLLAMA_MODEL || 'qwen2.5:3b',
   })
 })

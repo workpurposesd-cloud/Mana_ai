@@ -108,7 +108,7 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
   // 1. Local AI (Ollama - Default Primary Provider)
   if (modelSelection.provider === 'ollama' || config.aiProvider === 'ollama') {
     const ollamaBaseUrl =
-      config.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434'
+      config.ollamaBaseUrl || process.env.AI_API_BASE_URL || process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434'
     const ollamaModel =
       config.modelName || config.ollamaModel || process.env.OLLAMA_MODEL || 'qwen2.5:3b'
 
@@ -269,7 +269,7 @@ export async function generateOllamaStream(
 
   if (isCloudHost && isLocalhostUrl) {
     throw new Error(
-      'Local AI (Ollama) runs on your local computer (http://127.0.0.1:11434) and is not accessible from Netlify\'s cloud serverless functions. To use Local AI, run Mana AI locally using "npm run dev", or select another provider in Settings.'
+      'Local AI (Ollama) is running on your personal computer (127.0.0.1:11434) and cannot be reached directly by the Netlify cloud deployment.\n\nTo use Mana AI on Netlify with Ollama:\n1. Host an Ollama instance online (or expose your local instance via Cloudflare Tunnel, ngrok, RunPod, or a cloud server).\n2. In Netlify Site Settings > Environment Variables, configure:\n   - AI_API_BASE_URL = https://your-ollama-host.com (or OLLAMA_BASE_URL)\n   - OLLAMA_MODEL = qwen2.5:3b\n3. Redeploy the site.\n\nAlternatively, select Google Gemini, Groq, or OpenAI in Settings, or run Mana AI locally using "npm run dev".'
     )
   }
 
@@ -337,14 +337,19 @@ export async function generateOllamaStream(
     })
   } catch (err: any) {
     const msg = (err?.message || '').toLowerCase()
-    if (msg.includes('fetch failed') || msg.includes('econnrefused') || msg.includes('connection refused')) {
+    if (msg.includes('fetch failed') || msg.includes('econnrefused') || msg.includes('connection refused') || msg.includes('enotfound')) {
+      if (isCloudHost) {
+        throw new Error(
+          `Unable to connect to the cloud AI backend at ${baseUrl}. Please verify that your AI host is online, reachable, and that AI_API_BASE_URL (or OLLAMA_BASE_URL) is configured correctly in Netlify Environment Variables.`
+        )
+      }
       throw new Error(
         `Ollama is not running on ${baseUrl}. Please start Ollama on your computer by launching the Ollama app or running "ollama serve" in Windows PowerShell.`
       )
     }
     if (msg.includes('timeout') || msg.includes('timed out') || msg.includes('aborted')) {
       throw new Error(
-        `Ollama request timed out after 60 seconds while loading or running model "${modelName}". Please ensure your computer has sufficient RAM/GPU memory.`
+        `Ollama request timed out after 60 seconds while loading or running model "${modelName}". Please ensure your computer or cloud host has sufficient RAM/GPU memory.`
       )
     }
     throw new Error(`Failed to connect to Ollama at ${baseUrl}: ${err.message}`)

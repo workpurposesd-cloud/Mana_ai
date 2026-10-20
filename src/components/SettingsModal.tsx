@@ -133,6 +133,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     checking: boolean
     connected: boolean
     models: string[]
+    isCloudHost?: boolean
     error?: string
   }>({
     checking: false,
@@ -147,6 +148,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         connected: boolean
         models: string[]
         activeModel: string
+        isCloudHost?: boolean
         error?: string
       }>('/api/ollama/status')
       if (res.success && res.data) {
@@ -154,6 +156,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           checking: false,
           connected: Boolean(res.data.connected),
           models: res.data.models || [],
+          isCloudHost: Boolean(res.data.isCloudHost),
           error: res.data.error,
         })
       } else {
@@ -1010,8 +1013,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     {ollamaStatus.checking
                       ? 'Checking Ollama service...'
                       : ollamaStatus.connected
-                      ? 'Ollama is online and ready (Local)'
-                      : 'Ollama is not running locally'}
+                      ? (ollamaStatus.isCloudHost ? 'Cloud AI backend is online and ready' : 'Ollama is online and ready (Local)')
+                      : (ollamaStatus.error || 'Ollama is not running locally')}
                   </span>
                 </div>
 
@@ -1028,12 +1031,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       lineHeight: '1.45',
                     }}
                   >
-                    <div style={{ fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-main)' }}>
-                      Quick Windows PowerShell Setup:
-                    </div>
-                    <div>1. Install: <code>winget install Ollama.Ollama</code></div>
-                    <div>2. Run Model: <code>ollama run qwen2.5:3b</code></div>
-                    <div style={{ marginTop: '0.35rem' }}>Then click <strong>Check Status</strong> above.</div>
+                    {ollamaStatus.isCloudHost ? (
+                      <>
+                        <div style={{ fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-main)' }}>
+                          Netlify Cloud Deployment Notice:
+                        </div>
+                        <div>Netlify cloud serverless functions cannot connect to <code>127.0.0.1</code> on your personal computer.</div>
+                        <div style={{ marginTop: '0.35rem' }}>
+                          To connect Ollama in production, configure <code>AI_API_BASE_URL</code> (or <code>OLLAMA_BASE_URL</code>) in Netlify Environment Variables with your remote Ollama host, or select <strong>Google Gemini</strong> or <strong>Groq</strong> above.
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-main)' }}>
+                          Quick Windows PowerShell Setup:
+                        </div>
+                        <div>1. Install: <code>winget install Ollama.Ollama</code></div>
+                        <div>2. Run Model: <code>ollama run qwen2.5:3b</code></div>
+                        <div style={{ marginTop: '0.35rem' }}>Then click <strong>Check Status</strong> above.</div>
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -1115,7 +1132,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   className="settings-card-desc"
                   style={{ marginTop: '0.35rem', marginBottom: 0, fontSize: '0.75rem' }}
                 >
-                  Default is <code>http://127.0.0.1:11434</code>. Free, 100% private, no API keys needed.
+                  Default is <code>http://127.0.0.1:11434</code> for local development. In cloud deployments (e.g. Netlify), set <code>AI_API_BASE_URL</code> in environment variables or specify your remote Ollama host.
                 </span>
               </div>
             )}

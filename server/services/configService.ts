@@ -84,11 +84,14 @@ export class ConfigService {
     const envModel = process.env.OLLAMA_MODEL || process.env.MODEL_NAME || 'qwen2.5:3b'
     const defaultAiProvider = envProvider || 'ollama'
 
+    const envOllamaBaseUrl =
+      process.env.AI_API_BASE_URL || process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434'
+
     this.config = {
       aiProvider: defaultAiProvider,
       searchProvider: (process.env.DEFAULT_SEARCH_PROVIDER as any) || 'duckduckgo',
       searchMode: 'auto',
-      ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434',
+      ollamaBaseUrl: envOllamaBaseUrl,
       ollamaModel: process.env.OLLAMA_MODEL || 'qwen2.5:3b',
       geminiApiKey: process.env.GEMINI_API_KEY || '',
       openaiApiKey: process.env.OPENAI_API_KEY || '',
@@ -118,6 +121,10 @@ export class ConfigService {
       this.config.aiProvider = process.env.AI_PROVIDER as any
     }
     if (this.config.aiProvider === 'ollama') {
+      if (process.env.AI_API_BASE_URL || process.env.OLLAMA_BASE_URL) {
+        this.config.ollamaBaseUrl =
+          process.env.AI_API_BASE_URL || process.env.OLLAMA_BASE_URL || this.config.ollamaBaseUrl
+      }
       if (!this.config.ollamaModel || this.config.ollamaModel.startsWith('gemini')) {
         this.config.ollamaModel = process.env.OLLAMA_MODEL || 'qwen2.5:3b'
       }

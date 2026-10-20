@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { X, Lock, Mail, User as UserIcon, LogIn, UserPlus, Sparkles, AlertCircle, Check, KeyRound } from 'lucide-react'
+import { X, Lock, Mail, User as UserIcon, LogIn, UserPlus, Sparkles, AlertCircle, Check, KeyRound, Eye, EyeOff } from 'lucide-react'
 import { ManaLogo } from './ManaLogo'
 import { AuthUser } from '../types/chat'
 import { safeApiFetch } from '../utils/api'
@@ -15,6 +15,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
@@ -113,15 +114,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
           <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <ManaLogo size={24} />
             <div>
-              <div style={{ fontSize: '1rem', fontWeight: 600, color: '#f1f5f9' }}>
+              <div style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-main)' }}>
                 Mana AI Account
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 400 }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 400 }}>
                 Your AI. Your World.
               </div>
             </div>
           </div>
-          <button className="code-copy-btn" onClick={onClose} id="btn-close-auth" title="Close">
+          <button className="code-copy-btn" onClick={onClose} id="btn-close-auth" title="Close" aria-label="Close">
             <X size={18} />
           </button>
         </div>
@@ -187,11 +188,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
 
           {mode === 'signup' && (
             <div className="form-group">
-              <label className="form-label">
-                <UserIcon size={14} color="#818cf8" />
+              <label className="form-label" htmlFor="auth-name-input">
+                <UserIcon size={14} style={{ color: 'var(--text-muted)' }} />
                 <span>Full Name</span>
               </label>
               <input
+                id="auth-name-input"
                 type="text"
                 className="form-input"
                 placeholder="e.g. U Nagesh"
@@ -204,11 +206,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
           )}
 
           <div className="form-group">
-            <label className="form-label">
-              <Mail size={14} color="#818cf8" />
+            <label className="form-label" htmlFor="auth-email-input">
+              <Mail size={14} style={{ color: 'var(--text-muted)' }} />
               <span>Email Address</span>
             </label>
             <input
+              id="auth-email-input"
               type="email"
               className="form-input"
               placeholder="you@example.com"
@@ -220,27 +223,39 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
           </div>
 
           <div className="form-group">
-            <label className="form-label">
-              <Lock size={14} color="#818cf8" />
+            <label className="form-label" htmlFor="auth-password-input">
+              <Lock size={14} style={{ color: 'var(--text-muted)' }} />
               <span>{mode === 'reset' ? 'New Password' : 'Password'}</span>
             </label>
-            <input
-              type="password"
-              className="form-input"
-              placeholder={mode === 'reset' ? 'Enter new password (min 6 chars)' : 'Enter your password'}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+            <div className="auth-password-wrapper">
+              <input
+                id="auth-password-input"
+                type={showPassword ? 'text' : 'password'}
+                className="form-input"
+                placeholder={mode === 'reset' ? 'Enter new password (min 6 chars)' : 'Enter your password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <button
+                type="button"
+                className="auth-password-toggle"
+                onClick={() => setShowPassword((prev) => !prev)}
+                title={showPassword ? 'Hide password' : 'Show password'}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </div>
 
           {mode === 'signin' && (
             <div className="demo-credentials-box">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#38bdf8' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-main)', fontSize: '0.82rem' }}>
                 <Sparkles size={14} />
                 <span style={{ fontWeight: 600 }}>Demo Account Available</span>
               </div>
-              <p style={{ margin: '0.2rem 0', color: '#94a3b8', fontSize: '0.78rem' }}>
+              <p style={{ margin: '0.2rem 0', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
                 Quick test with pre-configured profile:
               </p>
               <button
@@ -253,7 +268,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
             </div>
           )}
 
-          <div className="modal-footer" style={{ marginTop: '1.2rem', padding: '0.8rem 0 0 0' }}>
+          <div className="modal-footer" style={{ marginTop: '1.2rem', padding: '0.8rem 0 0 0', background: 'transparent', borderTop: 'none' }}>
             <button
               type="button"
               className="btn-secondary"

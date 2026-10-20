@@ -178,6 +178,63 @@ async function main() {
     assert.strictEqual(status.baseUrl, 'http://127.0.0.1:59999')
   })
 
+  // TEST 8: AI_API_BASE_URL is supported for production cloud backend configuration
+  await runTest('Test 8: AI_API_BASE_URL is recognized in orchestrator and config', async () => {
+    const prevUrl = process.env.AI_API_BASE_URL
+    const prevNetlify = process.env.NETLIFY
+    try {
+      process.env.AI_API_BASE_URL = 'https://custom-cloud-ollama.example.com'
+      process.env.NETLIFY = 'true'
+
+      // Orchestrator should not overwrite server cloud AI_API_BASE_URL with client localhost
+      let capturedUrl = ''
+      await orchestrateChat(
+        {
+          prompt: 'Hello cloud',
+          ollamaBaseUrl: 'http://127.0.0.1:11434',
+        },
+        {
+          onToken: () => {},
+          onDone: () => {},
+        }
+      )
+    } finally {
+      process.env.AI_API_BASE_URL = prevUrl
+      process.env.NETLIFY = prevNetlify
+    }
+  })
+
+  // TEST 9: Netlify cloud deployment with unreachable remote host produces distinct error
+  await runTest('Test 9: Netlify cloud deployment with unreachable remote host produces distinct cloud error', async () => {
+    const prevNetlify = process.env.NETLIFY
+    const prevEnv = process.env.NODE_ENV
+    process.env.NETLIFY = 'true'
+    process.env.NODE_ENV = 'production'
+    let caughtError: any = null
+
+    try {
+      await generateOllamaStream(
+        'https://unreachable-ollama-cloud-host-9999.example.com',
+        'qwen2.5:3b',
+        'System prompt',
+        'Hello',
+        [],
+        () => {}
+      )
+    } catch (err: any) {
+      caughtError = err
+    } finally {
+      process.env.NETLIFY = prevNetlify
+      process.env.NODE_ENV = prevEnv
+    }
+
+    assert(caughtError !== null, 'Should throw error when remote cloud host is unreachable')
+    assert(
+      caughtError.message.includes('cloud AI backend') || caughtError.message.includes('AI_API_BASE_URL') || caughtError.message.includes('Failed to connect'),
+      `Expected cloud-specific error, got: ${caughtError.message}`
+    )
+  })
+
   console.log(`\nTests finished: ${passedCount} passed, ${failedCount} failed.`)
   if (failedCount > 0) {
     process.exit(1)

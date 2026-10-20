@@ -77,9 +77,23 @@ export async function orchestrateChat(
   if (options.modelName) {
     config.modelName = options.modelName
   }
+
+  const isCloudHost = Boolean(process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME)
+  const envCloudUrl = process.env.AI_API_BASE_URL || process.env.OLLAMA_BASE_URL
+
   if (options.ollamaBaseUrl) {
-    config.ollamaBaseUrl = options.ollamaBaseUrl
+    const isClientLocalhost =
+      options.ollamaBaseUrl.includes('127.0.0.1') || options.ollamaBaseUrl.includes('localhost')
+    // If running in cloud environment and server has a cloud AI URL, do not allow client's localhost default to override it
+    if (isCloudHost && isClientLocalhost && envCloudUrl) {
+      config.ollamaBaseUrl = envCloudUrl
+    } else {
+      config.ollamaBaseUrl = options.ollamaBaseUrl
+    }
+  } else if (envCloudUrl) {
+    config.ollamaBaseUrl = envCloudUrl
   }
+
   if (options.ollamaModel) {
     config.ollamaModel = options.ollamaModel
   }
