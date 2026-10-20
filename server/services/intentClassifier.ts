@@ -315,11 +315,15 @@ export function classifyIntent(
   }
 
   // 4B. CONVERSATIONAL GREETINGS & CASUAL OPENERS
-  // Greetings, pleasantries, "tell me something", everyday banter
+  // Greetings, pleasantries, "tell me something", everyday banter, roasting, emotional check-ins, language switches
   const conversationalRegex = /^(hi|hello|hey|greetings|namaste|namaskaram|how are you|how are you doing|how r u|how do you do|how's it going|how are things|ela unnav|ela unnaru|bagunnava|bavunnava|kushalama|good (morning|afternoon|evening)|bye|goodbye|bye bye|byee+|see you|see ya|take care|good night|gn)(\s+(bro|dude|mama|ra|bawa|babu|friend|there|all|everyone))?[\s!.?]*$/i
   const conversationalStandaloneRegex = /^(ok|okay|cool|nice|great|awesome|sounds good|got it|sure|alright|fine|thanks|thank you|thx|alvida|selavu|orey|mama|ra|enti ra|cheppu|em scene|em sangathi|bavunnava|ela unnav|bro|dude|wassup|what's up|whats up|sup)[\s!.?]*$/i
   const tellMeSomethingRegex = /^(tell me something|tell me a fact|tell me something interesting|say something|tell me a story|say something interesting|something interesting|tell me an interesting fact)[\s!.?]*$/i
   const teluguCasualRegex = /\b(nenu inka bathike unna|inka bathike unna|bathike unna|em chestunnav|ela unnav|bavunnava|bagunnava|thinnava|tinnava|bore kodutondi|chala bore|bore mama|nidra vastondi|cheppu mama|cheppu ra|orey mama|visugu vastondi|mood off)\b/i
+  const roastRegex = /^(roast me(\s+(bro|mama|ra|please))?|roast cheyyi|roast chey|make fun of me|tease me)[\s!.?]*$/i
+  const emotionalSupportRegex = /^(i am feeling (really )?(low|sad|depressed|down|lonely|anxious|stressed|upset)|i'?m feeling (really )?(low|sad|down)|feeling (really )?(low|sad|down)|i feel (really )?(sad|down|alone|hopeless)|chala badhaga undi|edho la undi|mood baledu)[\s!.?]*$/i
+  const languageSwitchRegex = /^(english only|telugu only|hindi only|(?:speak|talk|reply|answer|respond|use|text)\s+(?:only\s+in\s+|in\s+)?(english|telugu|hindi)(?:\s+only)?|(?:telugu|english)\s+lo\s+(?:matladu|cheppu|reply|raayi))[\s!.?]*$/i
+  const mamaDialogueRegex = /^(mama em chestunnav|em chestunnav mama|em chestunnav|em peekuthunnav|em sangathi|enti sangathi|em scene mama)[\s!.?]*$/i
   const isReaction = /^(haha+|lmao+|lol+|rofl+|hehe+|😂|🤣|👍|❤️|🔥|cool|nice|great|super|awesome|chill|done|perfect|wow|ayyo|sare)[\s!.?]*$/i.test(cleanText)
 
   if (
@@ -327,6 +331,10 @@ export function classifyIntent(
     conversationalStandaloneRegex.test(cleanText) ||
     tellMeSomethingRegex.test(lower) ||
     teluguCasualRegex.test(lower) ||
+    roastRegex.test(cleanText) ||
+    emotionalSupportRegex.test(cleanText) ||
+    languageSwitchRegex.test(cleanText) ||
+    mamaDialogueRegex.test(cleanText) ||
     isReaction
   ) {
     return {
@@ -335,6 +343,20 @@ export function classifyIntent(
       reason: 'Conversational greeting, everyday check-in, casual request, or reaction.',
       category: 'conversational',
       isDetailRequested: false,
+      isFollowUp: false,
+      originalQuery: cleanText,
+    }
+  }
+
+  // 4C. DIRECT CONCEPTS & DEFINITIONS (NO EXTERNAL SEARCH NEEDED)
+  const directConceptRegex = /^(explain apis?|what (are|is an?|is) apis?|vizag one more name|what is another name for vizag|another name for vizag|one more name for vizag)[\s!.?]*$/i
+  if (directConceptRegex.test(cleanText)) {
+    return {
+      needsSearch: false,
+      refinedQuery: cleanText,
+      reason: 'Direct concept explanation or geographic knowledge answered directly.',
+      category: 'general_knowledge',
+      isDetailRequested,
       isFollowUp: false,
       originalQuery: cleanText,
     }
@@ -491,8 +513,8 @@ export function classifyIntent(
       }
     }
 
-    // 5D. Short question follow-ups inheriting active topic: "how much", "nearby", "tell me more", "in Telugu", "why", "tell me what you know about him"
-    const genericFollowupRegex = /^(how much|how to reach( there)?|nearby|near by|what next|tell me more( about (it|this|that|them|him|her)?)?|tell me what you know( about (it|this|that|them|him|her)?)?|what do you know( about (it|this|that|them|him|her)?)?|in telugu|why|why so|how come|and you|mari nuvvu|what about you|is it good|is it safe|food|cost|rent|what about (its|the|his|her) (cost|price|history|culture|places|weather|safety|food|career|background|life)|explain (that|it|this) again|what else|give me more details)[\s?!.]*$/i
+    // 5D. Short question follow-ups inheriting active topic: "how much", "nearby", "tell me more", "in Telugu", "why", "one more name", "another name"
+    const genericFollowupRegex = /^(how much|how to reach( there)?|nearby|near by|what next|tell me more( about (it|this|that|them|him|her)?)?|tell me what you know( about (it|this|that|them|him|her)?)?|what do you know( about (it|this|that|them|him|her)?)?|in telugu|why|why so|how come|and you|mari nuvvu|what about you|is it good|is it safe|food|cost|rent|what about (its|the|his|her) (cost|price|history|culture|places|weather|safety|food|career|background|life)|explain (that|it|this) again|what else|give me more details|one more name|another name|other names?|what else is (it|that|this) called)[\s?!.]*$/i
     const isExplicitEntityQuestion = /^(do you know|what('?s| is)|who (was|is)|define|explain)\b/i.test(cleanText) && !/\b(it|its|this|that|them|there|him|her)\b/i.test(cleanText)
     if ((genericFollowupRegex.test(cleanText) || (isShortPrompt && !hasTimeKeywords)) && !isExplicitEntityQuestion) {
       let refined = cleanText

@@ -328,9 +328,15 @@ app.get('/api/ollama/status', async (req, res) => {
 /**
  * Memory Management Endpoints
  */
-app.get('/api/memories', async (_req, res) => {
+app.get('/api/memories', async (req, res) => {
+  const authHeader = req.headers.authorization
+  let userId: string | undefined
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const verified = authService.verifyToken(authHeader.slice(7))
+    if (verified?.id) userId = verified.id
+  }
   await memoryService.refreshFromDb()
-  res.json({ success: true, memories: memoryService.getMemories() })
+  res.json({ success: true, memories: memoryService.getMemories(userId) })
 })
 
 app.post('/api/memories', async (req, res) => {
@@ -340,8 +346,14 @@ app.post('/api/memories', async (req, res) => {
       res.status(400).json({ error: 'Key and value are required' })
       return
     }
+    const authHeader = req.headers.authorization
+    let userId: string | undefined
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const verified = authService.verifyToken(authHeader.slice(7))
+      if (verified?.id) userId = verified.id
+    }
     await memoryService.refreshFromDb()
-    const memory = memoryService.addMemory(category || 'preference', key, value)
+    const memory = memoryService.addMemory(category || 'preference', key, value, userId)
     await memoryService.saveMemoriesAsync()
     res.json({ success: true, memory })
   } catch (err: any) {
@@ -384,9 +396,15 @@ app.delete('/api/memories/:id', async (req, res) => {
   }
 })
 
-app.delete('/api/memories', async (_req, res) => {
+app.delete('/api/memories', async (req, res) => {
   try {
-    memoryService.clearAllMemories()
+    const authHeader = req.headers.authorization
+    let userId: string | undefined
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const verified = authService.verifyToken(authHeader.slice(7))
+      if (verified?.id) userId = verified.id
+    }
+    memoryService.clearAllMemories(userId)
     await memoryService.saveMemoriesAsync()
     res.json({ success: true, message: 'All memories cleared' })
   } catch (err: any) {

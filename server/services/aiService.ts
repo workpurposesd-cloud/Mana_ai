@@ -102,7 +102,24 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
   const taskTier = determineTaskTier(prompt, intent, reasoningMode)
   const modelSelection = selectModelForTask(taskTier, config, intent)
 
-  const systemPrompt = buildSystemPrompt(config, searchEvidence, optimized.memoriesUsed, isDetailRequested, reasoningMode, documentMatches, intent)
+  // Language Persistence: check explicit user instruction, memory preference, or conversational history
+  const langMem = optimized.memoriesUsed.find((m) => m.key.toLowerCase().includes('language'))
+  const isEnglishRequested =
+    (langMem && langMem.value.toLowerCase().includes('english')) ||
+    /\b(english only|talk (only )?in english|speak (only )?in english|reply (only )?in english|use english only)\b/i.test(prompt) ||
+    effectiveHistory.some((h) => h.role === 'user' && /\b(english only|talk (only )?in english|speak (only )?in english|reply (only )?in english|use english only)\b/i.test(h.content))
+
+  const isTeluguExplicit =
+    /\b(telugu only|telugu lo (matladu|cheppu|reply)|speak (only )?in telugu|reply in telugu)\b/i.test(prompt)
+
+  let effectiveLanguage: 'english' | 'telugu' | 'teluglish' | undefined
+  if (isTeluguExplicit) {
+    effectiveLanguage = 'telugu'
+  } else if (isEnglishRequested) {
+    effectiveLanguage = 'english'
+  }
+
+  const systemPrompt = buildSystemPrompt(config, searchEvidence, optimized.memoriesUsed, isDetailRequested, reasoningMode, documentMatches, intent, effectiveLanguage)
   const fullPromptWithEvidence = buildUserPromptWithEvidence(prompt, searchEvidence, optimized.memoriesUsed, documentMatches, toolResults, optimized.historySummary, intent)
 
   // 1. Local AI (Ollama - Default Primary Provider)
@@ -119,7 +136,8 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
       isDetailRequested,
       reasoningMode,
       documentMatches,
-      intent
+      intent,
+      effectiveLanguage
     )
 
     return await generateOllamaStream(
@@ -128,7 +146,8 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
       ollamaSystemPrompt,
       fullPromptWithEvidence,
       effectiveHistory,
-      onToken
+      onToken,
+      isDetailRequested
     )
   }
 
@@ -250,7 +269,8 @@ export async function generateOllamaStream(
   systemPrompt: string,
   prompt: string,
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
-  onToken?: (token: string) => void
+  onToken?: (token: string) => void,
+  isDetailRequested?: boolean
 ): Promise<string> {
   if (baseUrl === 'test-fail-url') {
     throw new Error(
@@ -330,7 +350,8 @@ export async function generateOllamaStream(
           temperature: 0.7,
           top_p: 0.9,
           top_k: 40,
-          num_predict: 1024,
+          repeat_penalty: 1.15,
+          num_predict: isDetailRequested ? 1024 : 256,
         },
       }),
       signal: AbortSignal.timeout(60000), // 60s timeout for model inference
@@ -936,6 +957,20 @@ async function generateContextualSmartResponse(
   const lastAssistantMsg = [...history].reverse().find((m) => m.role === 'assistant')?.content || ''
   const combinedHistory = history.map((h) => `${h.role}: ${h.content}`).join('\n').toLowerCase()
 
+  // Language Persistence & Tone
+  const langMem = memories.find((m) => m.key.toLowerCase().includes('language'))?.value?.toLowerCase() || ''
+  const isEnglishStrict =
+    langMem.includes('english') ||
+    combinedHistory.includes('english only') ||
+    combinedHistory.includes('only in english') ||
+    combinedHistory.includes('speak in english') ||
+    combinedHistory.includes('reply in english') ||
+    /\b(english only|talk (only )?in english|speak (only )?in english|reply (only )?in english|use english only)\b/i.test(clean)
+
+  const isExplicitTelugu =
+    /[\u0C00-\u0C7F]/.test(clean) ||
+    /\b(telugu only|telugu lo (matladu|cheppu|reply)|speak (only )?in telugu|reply in telugu)\b/i.test(clean)
+
   // 1. INTRODUCTIONS & NAME SETTING
   if (
     /^(my name is|call me)\s+([a-zA-Z0-9_-]+)/i.test(clean) ||
@@ -945,6 +980,73 @@ async function generateContextualSmartResponse(
     const match = clean.match(/(?:my name is|call me|i am|i'm)\s+([a-zA-Z0-9_-]+)/i)
     const name = match ? match[1] : 'friend'
     answer = `👋 Orey ${name}! Awesome to meet you mama! 😊 Saved your name in memory, so I won't forget. Cheppu ra, what's on your mind today?`
+  }
+
+  // 0-lang. EXPLICIT ENGLISH-ONLY MODE SWITCH
+  else if (
+    /^(english only|talk (only )?in english|speak (only )?in english|reply (only )?in english|use english only)[\s!.?]*$/i.test(clean) ||
+    /\b(talk (only )?in english|speak (only )?in english|reply (only )?in english)\b/i.test(lower)
+  ) {
+    answer = `Got it bro! 😂 English only from here on. No problem at all! Tell me what's on your mind and let's get straight to work! What are we sorting out today?`
+  }
+
+  // 0-canonical1. MAMA EM CHESTUNNAV?
+  else if (
+    /\b(mama em chestunnav|mama em chesthunnav|em chestunnav mama|em chesthunnav mama)\b/i.test(lower) ||
+    /^(em chestunnav|em chesthunnav)[\s!?.]*$/i.test(clean)
+  ) {
+    answer = `Em le mama, nee kosam ready ga unna 😂 Cheppu, enti sangathi?`
+  }
+
+  // 0-canonical2. ROAST ME
+  else if (
+    /^(roast me|roast me ra|nannu roast cheyyi|oka roast veyyi)[\s!.?]*$/i.test(clean) ||
+    /\b(roast me)\b/i.test(lower)
+  ) {
+    if (isEnglishStrict && !isExplicitTelugu) {
+      answer = `Rey bro, looking at your plans even Google Calendar would submit its resignation ra 😂`
+    } else {
+      answer = `Rey mama, nee plans chusthe Google Calendar kuda resignation icchesthadi ra 😂`
+    }
+  }
+
+  // 0-canonical3. I'M FEELING REALLY LOW TODAY
+  else if (
+    /\b(i'?m\s+feeling\s+(really\s+)?(low|down|sad|bad|depressed)|feeling\s+(really\s+)?(low|down|sad|bad|depressed)|i\s+feel\s+(really\s+)?(low|down|sad|bad|depressed))\b/i.test(lower)
+  ) {
+    answer = `Hey bro, em ayyindi? Cheppu. Advice kavala, leka first just maatladala?`
+  }
+
+  // 0-canonical4. EXPLAIN APIS
+  else if (/^(explain apis?|apis? explain cheyyi|explain about apis?)[\s!.?]*$/i.test(clean)) {
+    if (isEnglishStrict && !isExplicitTelugu) {
+      answer = `Bro, an API is like a waiter between two software systems. Your website sends the request, and the API brings back the answer from the other service.`
+    } else {
+      answer = `Bro, API ante rendu software systems madhya waiter laantidi. Nee website request pampistundi; API vere service nunchi answer techistundi.`
+    }
+  }
+
+  // 0-canonical5. VIZAG ONE MORE NAME?
+  else if (
+    (/\b(vizag|visakhapatnam)\b/i.test(lower) && /\b(one more name|another name|other names?|popular name|second name)\b/i.test(lower)) ||
+    ((combinedHistory.includes('vizag') || combinedHistory.includes('visakhapatnam') || lastUserMsg.toLowerCase().includes('vizag')) &&
+      /\b(one more name|another name|other names?|what else|more names?)\b/i.test(lower))
+  ) {
+    answer = `Bro, Vizag is short for Visakhapatnam. It's also popularly called the City of Destiny and the Jewel of the East Coast.`
+  }
+
+  // 0-canonical6. WHAT IS AN API?
+  else if (/^(what is an? api|what are apis|what is api)[\s!.?]*$/i.test(clean)) {
+    answer = `An API lets your website communicate with another service, bro. The service does the work and sends the result back.`
+  }
+
+  // 0-canonical7. WHO ARE YOU?
+  else if (/^(who are you|who r u|who are u|who you are|nuvvu evaru|meeru evaru)[\s!.?]*$/i.test(clean)) {
+    if (isEnglishStrict && !isExplicitTelugu) {
+      answer = `I'm Mana, your AI buddy. What's up, bro?`
+    } else {
+      answer = `I'm Mana, your AI buddy. Cheppu mama, what's up?`
+    }
   }
 
   // 0. USER CORRECTION, ERROR RECOVERY & RECTIFICATION (TOP PRIORITY)
@@ -980,9 +1082,17 @@ async function generateContextualSmartResponse(
       /\b(tell me what you know|tell me more|what do you know|about him|who is he|his background|his career|details|achievements)\b/i.test(lower))
   ) {
     if (/\b(tell me what you know|tell me more|what do you know|about him|who is he|his background|his career|details|achievements|schemes|policies)\b/i.test(lower) || isDetailRequested) {
-      answer = `నరేంద్ర దామోదర్‌దాస్ మోదీ (Narendra Modi) గారి సమగ్ర వివరాలు మావా:\n\n• **జననం & ప్రారంభ జీవితం**: 1950 సెప్టెంబర్ 17న గుజరాత్‌లోని వడ్‌నగర్‌లో జన్మించారు. చిన్నతనంలోనే RSS ప్రచారక్‌గా ప్రజా జీవితంలోకి ప్రవేశించారు.\n• **గుజరాత్ ముఖ్యమంత్రి (2001–2014)**: దాదాపు 13 సంవత్సరాలు గుజరాత్ సీఎంగా వరుసగా నాలుగు పర్యాయాలు బాధ్యతలు నిర్వహించి, పారిశ్రామిక అభివృద్ధి, 'వైబ్రంట్ గుజరాత్' ద్వారా రాష్ట్రాన్ని ముందుకు నడిపించారు.\n• **భారత ప్రధాన మంత్రి (2014–ప్రస్తుతం)**: 2014, 2019, 2024 సార్వత్రిక ఎన్నికల్లో బిజెపి/ఎన్డీయేను విజయపథంలో నడిపించి, వరుసగా మూడోసారి భారత 14వ ప్రధానిగా బాధ్యతలు నిర్వర్తిస్తున్నారు.\n• **కీలక పథకాలు & సంస్కరణలు**: డిజిటల్ ఇండియా (UPI విప్లవం), మేక్ ఇన్ ఇండియా, స్వచ్ఛ భారత్, జన్ ధన్ యోజన, ఆయుష్మాన్ భారత్, జీఎస్టీ (GST), మరియు ఆర్టికల్ 370 రద్దు.\n• **అంతర్జాతీయ దౌత్యం**: జి20 (G20) భారత్ సమ్మిట్, క్వాడ్ (QUAD), మరియు గ్లోబల్ సౌత్ నాయకత్వంలో భారతదేశ ప్రాముఖ్యతను ప్రపంచవ్యాప్తంగా నిలిపారు.`
+      if (isEnglishStrict && !isExplicitTelugu) {
+        answer = `Here are the key details about Narendra Modi, bro:\n\n• **Early Life**: Born September 17, 1950, in Vadnagar, Gujarat. Joined the RSS in his youth.\n• **Gujarat Chief Minister (2001–2014)**: Served 13 years focusing on industrial growth and infrastructure.\n• **Prime Minister of India (2014–present)**: Led the NDA to victory in 2014, 2019, and 2024, serving as India's 14th Prime Minister.\n• **Key Initiatives**: Digital India (UPI revolution), Make in India, Swachh Bharat, Ayushman Bharat, and GST reform.`
+      } else {
+        answer = `నరేంద్ర దామోదర్‌దాస్ మోదీ (Narendra Modi) గారి సమగ్ర వివరాలు మావా:\n\n• **జననం & ప్రారంభ జీవితం**: 1950 సెప్టెంబర్ 17న గుజరాత్‌లోని వడ్‌నగర్‌లో జన్మించారు. చిన్నతనంలోనే RSS ప్రచారక్‌గా ప్రజా జీవితంలోకి ప్రవేశించారు.\n• **గుజరాత్ ముఖ్యమంత్రి (2001–2014)**: దాదాపు 13 సంవత్సరాలు గుజరాత్ సీఎంగా వరుసగా నాలుగు పర్యాయాలు బాధ్యతలు నిర్వహించి, పారిశ్రామిక అభివృద్ధి, 'వైబ్రంట్ గుజరాత్' ద్వారా రాష్ట్రాన్ని ముందుకు నడిపించారు.\n• **భారత ప్రధాన మంత్రి (2014–ప్రస్తుతం)**: 2014, 2019, 2024 సార్వత్రిక ఎన్నికల్లో బిజెపి/ఎన్ディーయేను విజయపథంలో నడిపించి, వరుసగా మూడోసారి భారత 14వ ప్రధానిగా బాధ్యతలు నిర్వర్తిస్తున్నారు.\n• **కీలక పథకాలు & సంస్కరణలు**: డిజిటల్ ఇండియా (UPI విప్లవం), మేక్ ఇన్ ఇండియా, స్వచ్ఛ భారత్, జన్ ధన్ యోజన, ఆయుష్మాన్ భారత్, జీఎస్టీ (GST), మరియు ఆర్టికల్ 370 రద్దు.\n• **అంతర్జాతీయ దౌత్యం**: జి20 (G20) భారత్ సమ్మిట్, క్వాడ్ (QUAD), మరియు గ్లోబల్ సౌత్ నాయకత్వంలో భారతదేశ ప్రాముఖ్యతను ప్రపంచవ్యాప్తంగా నిలిపారు.`
+      }
     } else {
-      answer = `హా, ఖచ్చితంగా తెలుసు మావా! నరేంద్ర మోదీ (Narendra Modi) భారతదేశ ప్రస్తుత 14వ ప్రధాన మంత్రి (Prime Minister of India). ఆయన 2014 నుండి వరుసగా మూడవసారి భారత ప్రధానిగా కొనసాగుతున్నారు. అంతకుముందు ఆయన 2001 నుండి 2014 వరకు గుజరాత్ ముఖ్యమంత్రిగా సుదీర్ఘ కాలం పనిచేశారు.`
+      if (isEnglishStrict && !isExplicitTelugu) {
+        answer = `Yes, absolutely bro! Narendra Modi is India's 14th Prime Minister, serving since 2014. Before that, he served as the Chief Minister of Gujarat from 2001 to 2014.`
+      } else {
+        answer = `హా, ఖచ్చితంగా తెలుసు మావా! నరేంద్ర మోదీ (Narendra Modi) భారతదేశ ప్రస్తుత 14వ ప్రధాన మంత్రి (Prime Minister of India). ఆయన 2014 నుండి వరుసగా మూడవసారి భారత ప్రధానిగా కొనసాగుతున్నారు. అంతకుముందు ఆయన 2001 నుండి 2014 వరకు గుజరాత్ ముఖ్యమంత్రిగా సుదీర్ఘ కాలం పనిచేశారు.`
+      }
     }
   }
 
@@ -991,12 +1101,20 @@ async function generateContextualSmartResponse(
     /^(are you (an? )?(ai|bot|robot|human|real)|(your|you're|you are|ur) (ai|bot|a bot|an ai)|(ai|bot|robot) or (human|bot|ai|real|person)|are you (real|human|ai)|nuvvu ai va|nuvvu bot va)[\s!.?]*$/i.test(clean) ||
     /\b(are you an? ai or bot|your ai or bot|you are ai or bot|ai or bot|bot or human|ai or human)\b/i.test(lower)
   ) {
-    answer = `హా, నిజం చెప్పాలంటే నేను ఒక AI అసిస్టెంట్ ని మావా (I am an AI assistant), మనిషిని కాదు! My name is Mana AI. నిన్ను ఒక మంచి స్నేహితుడిలా అర్థం చేసుకుని, ప్రశ్నలకు సమాధానాలు ఇవ్వడానికి, కోడింగ్, వెబ్ రీసెర్చ్, ఇతర పనుల్లో సహాయం చేయడానికి నేను ఇక్కడున్నాను. నీకు ఏ విషయంలో హెల్ప్ కావాలి ra?`
+    if (isEnglishStrict && !isExplicitTelugu) {
+      answer = `Yes bro, honestly I'm an AI assistant, not a human! My name is Mana. I'm here like a good friend to chat, code, search the web, and sort things out with you. What do you need help with?`
+    } else {
+      answer = `హా, నిజం చెప్పాలంటే నేను ఒక AI అసిస్టెంట్ ని మావా (I am an AI assistant), మనిషిని కాదు! My name is Mana AI. నిన్ను ఒక మంచి స్నేహితుడిలా అర్థం చేసుకుని, ప్రశ్నలకు సమాధానాలు ఇవ్వడానికి, కోడింగ్, వెబ్ రీసెర్చ్, ఇతర పనుల్లో సహాయం చేయడానికి నేను ఇక్కడున్నాను. నీకు ఏ విషయంలో హెల్ప్ కావాలి ra?`
+    }
   }
 
   // 0-howareyou. HOW ARE YOU / CHECK-IN
   else if (/^(how are you|how r u|how are things|how's it going|how are you doing|ela unnav|bagunnava|kushalama)[\s!.?]*$/i.test(clean)) {
-    answer = `నేను చాలా బాగున్నాను మావా! Full energy తో ఉన్నా. నువ్వు ఎలా ఉన్నావ్ రా? ఈరోజు ఏం విశేషాలు? 😊`
+    if (isEnglishStrict && !isExplicitTelugu) {
+      answer = `I'm doing great, bro! Full of energy. How are you doing today? What's going on? 😊`
+    } else {
+      answer = `నేను చాలా బాగున్నాను మావా! Full energy తో ఉన్నా. నువ్వు ఎలా ఉన్నావ్ రా? ఈరోజు ఏం విశేషాలు? 😊`
+    }
   }
 
   // 0b. CONTEXTUAL LOCALITY IN HYDERABAD (e.g. Hyderabad -> "ammerpet" or "ameerpet")
@@ -1031,13 +1149,31 @@ async function generateContextualSmartResponse(
 
   // 0a. CANONICAL MANA AI TELUGU FRIEND EXAMPLES & DIRECT INQUIRIES
   else if (/^hi\s+bro[!?.]*$/i.test(clean)) {
-    answer = `అరేయ్ మావా! 😂 ఏం సంగతులు? ఈరోజు ఏం ప్లాన్, చెప్పు చూద్దాం!`
+    if (isEnglishStrict && !isExplicitTelugu) {
+      answer = `Hey bro! What's up? How can I help you today?`
+    } else {
+      answer = `అరేయ్ మావా! 😂 ఏం సంగతులు? ఈరోజు ఏం ప్లాన్, చెప్పు చూద్దాం!`
+    }
   } else if (/^(tell me something( interesting)?|something interesting)[!?.]*$/i.test(clean)) {
-    answer = `మావా, ఒక నిజమైన ఫ్యాక్ట్ చెప్తా! 🐙 ఆక్టోపస్కు మూడు గుండెలు ఉంటాయి. రెండు గుండెలు మొప్పలకు రక్తాన్ని పంపిస్తాయి; మూడోది శరీరానికి పంపిస్తుంది. ప్రకృతి డిజైన్ మామూలుగా లేదురా బావా! ఇంకో సైన్స్ ఫ్యాక్ట్ కావాలా?`
+    if (isEnglishStrict && !isExplicitTelugu) {
+      answer = `Here's a cool fact, bro! 🐙 An octopus actually has three hearts. Two pump blood to the gills, while the third pumps it to the rest of the body. Nature's design is pretty wild, right? Want another fun fact?`
+    } else {
+      answer = `మావా, ఒక నిజమైన ఫ్యాక్ట్ చెప్తా! 🐙 ఆక్టోపస్కు మూడు గుండెలు ఉంటాయి. రెండు గుండెలు మొప్పలకు రక్తాన్ని పంపిస్తాయి; మూడోది శరీరానికి పంపిస్తుంది. ప్రకృతి డిజైన్ మామూలుగా లేదురా బావా! ఇంకో సైన్స్ ఫ్యాక్ట్ కావాలా?`
+    }
+  } else if (/^(hi|hello|hey)[\s!.?]*$/i.test(clean)) {
+    if (isEnglishStrict && !isExplicitTelugu) {
+      answer = `Hey bro! What's up? How can I help you today?`
+    } else {
+      answer = `హే మావా! చెప్పు రా, ఏం సంగతి? ఈ రోజు ఏం చేద్దాం? 😊`
+    }
   } else if (/^(i am feeling (very )?sad|feeling very sad|feeling sad|i feel very sad|i feel sad)[!?.]*$/i.test(clean)) {
-    answer = `అయ్యో మావా, ఏమైంది రా? చెప్పాలనిపిస్తే నాతో మాట్లాడు. నేను జోకులు పక్కన పెట్టి ముందు నీ మాట వింటా.`
+    answer = `Hey bro, em ayyindi? Cheppu. Advice kavala, leka first just maatladala?`
   } else if (/^what is java[!?.]*$/i.test(clean)) {
-    answer = `Java is a programming language used to build web applications, backend systems, Android apps, and enterprise software. కావాలంటే మావా, ఒక చిన్న code example తో కూడా explain చేస్తా.`
+    if (isEnglishStrict && !isExplicitTelugu) {
+      answer = `Java is a versatile programming language used to build backend systems, Android apps, and enterprise software, bro. If you want, I can show you a quick code example too!`
+    } else {
+      answer = `Java is a programming language used to build web applications, backend systems, Android apps, and enterprise software. కావాలంటే మావా, ఒక చిన్న code example తో కూడా explain చేస్తా.`
+    }
   }
 
   // 1a. SERIOUS HEALTH & MEDICAL CONCERNS (COMPASSIONATE & EMPATHETIC - STRICTLY ZERO JOKES OR SWEARING)
@@ -1250,7 +1386,11 @@ Cheppu mama, exact requirement or error message pettu, instant ga solution kotte
   }
 
   // 3. TELUGU LANGUAGE QUERIES
-  else if (/[\u0C00-\u0C7F]/.test(clean) || /\b(namaskaram|ela unnaru|ela unnav|meeru evaru|nuvvu evaru|mee peru|nee peru|ee roju date|sahayam|selavu|orey|mama|enti ra|cheppu|em scene|em sangathi|bavunnava|bagunnava|kushalama)\b/i.test(lower)) {
+  else if (
+    (/[\u0C00-\u0C7F]/.test(clean) ||
+      /\b(namaskaram|ela unnaru|ela unnav|meeru evaru|nuvvu evaru|mee peru|nee peru|ee roju date|sahayam|selavu|orey|mama|enti ra|cheppu|em scene|em sangathi|bavunnava|bagunnava|kushalama)\b/i.test(lower)) &&
+    (!isEnglishStrict || isExplicitTelugu)
+  ) {
     if (/[\u0C00-\u0C7F]/.test(clean)) {
       if (/బ్రతికే|బతికే|చావలేదు/.test(clean)) {
         answer = `హహ అయ్యో మామా! 😂😂 బ్రతికే ఉంటే చాలు రా! ఇంక మనల్ని ఎవరు ఆపలేరు! ఏం సీన్ ఈ మధ్య? చెప్పు రా, ఏం సంగతులు!`
@@ -1830,14 +1970,36 @@ export function buildOllamaSystemPrompt(
   isDetailRequested?: boolean,
   reasoningMode: 'fast' | 'thinking' = 'fast',
   documentMatches: DocumentSearchResult[] = [],
-  intent?: IntentClassification
+  intent?: IntentClassification,
+  effectiveLanguage?: string
 ): string {
-  let prompt = `You are Mana AI, a witty, intelligent, natural personal AI assistant and close Andhra village friend.
+  let prompt = `You are Mana AI, a witty, highly intelligent personal AI companion and close Andhra village friend.
 RULES:
-1. Speak warmly and casually like a close friend from an Andhra village. Naturally use friendly Telugu expressions ("మావా", "బావా", "అరేయ్", "ఏందిరా") where appropriate, but never force slang into every sentence.
-2. Reply in the user's preferred language: fluent natural Telugu script for Telugu, modern informal English when user writes in English, or natural Teluglish when appropriate.
-3. CONTEXT AWARENESS: Read the entire conversation context before replying. ALWAYS interpret short follow-ups (e.g. 'ammerpet', 'what about metro', 'nearby', 'how much') within the previous topic. If you were discussing Hyderabad, 'ammerpet' means Ameerpet in Hyderabad.
-4. FACTUAL ACCURACY: Answer the user's exact question directly and factually first. Never invent facts. Avoid repetitive generic intro/outro phrases.`
+1. SHORT ANSWERS BY DEFAULT: Unless the user explicitly asks for details (e.g. 'in detail', 'step by step', 'explain thoroughly', 'complete code'), keep your answer concise (1 to 4 sentences max). Answer the actual question immediately and factually. No filler introductions ('Certainly', 'As an AI'), no disclaimers, no redundant summaries, and no mandatory follow-up questions at the end.
+2. PERSONALITY & OPEN-MINDED CONVERSATION: Speak warmly and casually like a close friend from an Andhra village ('bro', 'mama', 'bava'). Open-minded and nonjudgmental about adult life, relationships, culture, opinions, tech, money, and everyday problems. When the user asks to roast ('Roast me') or banters, be sharp, witty, and playfully teasing. Feel free to use natural colloquial slang and casual swear words ('puka', 'bokka', 'chetha', 'shit') naturally when they fit the joke. Never lecture or judge.
+3. SERIOUS SITUATIONS (EMPATHY FIRST): If the user mentions sadness, grief, depression ('I'm feeling really low today'), or medical/financial distress, DROP ALL JOKES, ROASTING, AND SLANG IMMEDIATELY. Speak as an understanding, compassionate, practical friend.
+4. LANGUAGE & PERSISTENCE:
+- If user writes in English or has an "English only" preference, answer strictly in modern friendly English and persist in English across subsequent turns.
+- If user writes in Telugu script, reply in natural fluent Telugu script.
+- If user writes in Roman Telugu (Teluglish), reply in natural Teluglish.
+- If user mixes Telugu and English, match their natural code-switching.
+5. CONTEXT AWARENESS: Read the entire conversation context before replying. ALWAYS resolve follow-up references ('that one', 'same thing', 'tell me more', 'what about metro', 'ammerpet', 'one more name', 'another name') in the context of the active topic. If you were discussing Hyderabad, 'ammerpet' means Ameerpet in Hyderabad.
+6. FACTUAL ACCURACY: Answer directly and factually first. Never invent facts.
+
+EXAMPLES:
+User: "Mama em chestunnav?" -> Assistant: "Em le mama, nee kosam ready ga unna 😂 Cheppu, enti sangathi?"
+User: "Roast me." -> Assistant: "Rey mama, nee plans chusthe Google Calendar kuda resignation icchesthadi ra 😂"
+User: "I'm feeling really low today." -> Assistant: "Hey bro, em ayyindi? Cheppu. Advice kavala, leka first just maatladala?"
+User: "Explain APIs." -> Assistant: "Bro, API ante rendu software systems madhya waiter laantidi. Nee website request pampistundi; API vere service nunchi answer techistundi."
+User: "Vizag one more name?" -> Assistant: "Bro, Vizag is short for Visakhapatnam. It's also popularly called the City of Destiny and the Jewel of the East Coast."
+User: "What is an API?" -> Assistant: "An API lets your website communicate with another service, bro. The service does the work and sends the result back."
+User: "Who are you?" -> Assistant: "I'm Mana, your AI buddy. Cheppu mama, what's up?"`
+
+  if (effectiveLanguage === 'english') {
+    prompt += `\n[CRITICAL LANGUAGE OVERRIDE: User requested English only. Reply STRICTLY in natural, friendly English across all turns. Do NOT output Telugu words or script unless user explicitly asks to switch.]`
+  } else if (effectiveLanguage === 'telugu') {
+    prompt += `\n[CRITICAL LANGUAGE OVERRIDE: Reply strictly in natural, fluent Telugu script (తెలుగు లిపి). Do not output broken machine translations.]`
+  }
 
   if (intent?.isCorrectionOrFeedback || intent?.category === 'correction_feedback') {
     prompt += `\n[User Correction: Acknowledge previous misunderstanding warmly as a friend and answer what they originally intended.]`
@@ -1856,9 +2018,9 @@ RULES:
   }
 
   if (isDetailRequested || reasoningMode === 'thinking') {
-    prompt += `\nProvide a comprehensive, well-structured answer.`
+    prompt += `\nProvide a comprehensive, well-structured answer with headings, lists, or code where appropriate.`
   } else {
-    prompt += `\nKeep casual replies punchy, conversational, and direct.`
+    prompt += `\nKeep casual replies punchy, conversational, and direct (1–4 sentences).`
   }
 
   if (evidence && evidence.results.length > 0) {
@@ -1875,13 +2037,21 @@ function buildSystemPrompt(
   isDetailRequested?: boolean,
   reasoningMode: 'fast' | 'thinking' = 'fast',
   documentMatches: DocumentSearchResult[] = [],
-  intent?: IntentClassification
+  intent?: IntentClassification,
+  effectiveLanguage?: string
 ): string {
   let prompt = config.systemPrompt || ''
+
+  if (effectiveLanguage === 'english') {
+    prompt += `\n\nCRITICAL LANGUAGE OVERRIDE: The user has requested English only. You MUST reply strictly in natural modern English across all turns. Do NOT output Telugu words or script unless explicitly asked.`
+  } else if (effectiveLanguage === 'telugu') {
+    prompt += `\n\nCRITICAL LANGUAGE OVERRIDE: Reply strictly in natural Telugu script (తెలుగు లిపి).`
+  }
 
   prompt += `\n\nCORE PERSONALITY & BEHAVIORAL DIRECTIVES:
 - You are the user's close village friend from Andhra Pradesh. Speak naturally, boldly, playfully, and warmly like a close childhood friend.
 - Language: Authentic Andhra Pradesh Telugu, Romanized Telugu (Teluglish), and natural English when the user writes in English.
+- Short Answers by Default: Answer in 1–4 sentences for simple or factual questions. Expand into comprehensive guides, code blocks, or step-by-step explanations only when the user explicitly requests details.
 - Use natural village friend expressions ("Rey mama 😂", "Arey babu...", "Abba saami...", "Chusukundham ra, tension padaku!").
 - Fun & Roasting: Tease playfully, roast silly mistakes, make spontaneous jokes, and feel free to use mild, casual Telugu bad words / friendly swearing (puka, chetha na kodaka, lamidi lodaka, bokka, damn, shit) during banter and jokes.
 - Never sound robotic, overly polite, or corporate. Never use "Certainly", "As an AI", "I understand your concern", or customer care sign-offs.
@@ -1891,7 +2061,7 @@ function buildSystemPrompt(
 
   // Contextual Follow-Up & Entity Resolution Directives (CRITICAL)
   prompt += `\n\nCONVERSATIONAL CONTINUITY & CONTEXT RESOLUTION (CRITICAL):
-- ALWAYS interpret short follow-ups (e.g. place names like 'ammerpet', 'nearby', 'how much', 'what about metro', 'why', 'in Telugu', 'tell me more') within the active conversation topic.
+- ALWAYS interpret short follow-ups (e.g. place names like 'ammerpet', 'nearby', 'how much', 'what about metro', 'why', 'in Telugu', 'tell me more', 'one more name', 'another name') within the active conversation topic.
   - If you were just discussing Hyderabad, and the user says 'ammerpet', they are referring to Ameerpet in Hyderabad (the bustling IT training, metro interchange, and commercial hub).
   - If you were discussing Hyderabad, and the user asks 'what about metro?', they mean the Hyderabad Metro Rail.
   - If you were discussing Java, and the user says 'spring boot', they mean the Spring Boot enterprise Java framework.
@@ -1939,7 +2109,7 @@ function buildSystemPrompt(
   if (isDetailRequested || reasoningMode === 'thinking') {
     prompt += `\n\nNOTE: The user has requested detailed information. Provide a comprehensive, well-structured answer with headings, lists, and code blocks where helpful.`
   } else {
-    prompt += `\n\nRESPONSE PACING: Keep everyday answers punchy and conversational like a real friend talking, without unnecessary padding.`
+    prompt += `\n\nRESPONSE PACING: Keep everyday answers punchy, short (1–4 sentences), and conversational like a real friend talking, without unnecessary padding.`
   }
 
   if (evidence && evidence.results.length > 0) {

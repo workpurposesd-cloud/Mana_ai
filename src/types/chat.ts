@@ -110,6 +110,7 @@ export interface DocumentMetadata {
 
 export interface MemoryItem {
   id: string
+  userId?: string
   category: 'personal' | 'preference' | 'correction' | 'project'
   key: string
   value: string

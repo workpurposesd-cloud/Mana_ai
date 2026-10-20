@@ -155,11 +155,11 @@ export async function orchestrateChat(
   const isMemoryEnabled = config.memoryEnabled !== false
 
   // 3. User Memory Detection & Retrieval
-  const learnedMemory = memoryService.detectAndSaveUserPreferences(cleanPrompt, isMemoryEnabled)
+  const learnedMemory = memoryService.detectAndSaveUserPreferences(cleanPrompt, isMemoryEnabled, authUser?.id)
   if (learnedMemory && callbacks?.onMemorySaved) {
     callbacks.onMemorySaved(learnedMemory)
   }
-  const relevantMemories = memoryService.getRelevantMemories(cleanPrompt, isMemoryEnabled)
+  const relevantMemories = memoryService.getRelevantMemories(cleanPrompt, isMemoryEnabled, authUser?.id)
 
   // 4. Document RAG Retrieval
   const documentMatches = documentService.searchKnowledge(cleanPrompt, 3)
