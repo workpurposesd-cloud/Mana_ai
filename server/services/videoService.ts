@@ -2,13 +2,14 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { configService } from './configService.js'
+import { dbService } from './dbService.js'
 import { VideoJobMetadata, ProviderRestrictions } from '../types.js'
 
 export interface VideoGenerationOptions {
   prompt: string
   aspectRatio?: '16:9' | '9:16' | '1:1'
   duration?: number
-  provider?: 'luma' | 'replicate' | 'runway'
+  provider?: 'luma' | 'replicate' | 'runway' | 'selfhosted'
 }
 
 export const PROVIDER_RESTRICTIONS: Record<string, ProviderRestrictions> = {
@@ -21,7 +22,7 @@ export const PROVIDER_RESTRICTIONS: Record<string, ProviderRestrictions> = {
     supportedAspectRatios: ['16:9', '9:16', '1:1', '4:3', '21:9'],
   },
   replicate: {
-    name: 'Replicate (Wan-2.1 / Minimax Video)',
+    name: 'Replicate (Wan 2.2 / Wan-2.1 / Minimax Video)',
     pricing: '~$0.05–$0.20 per generation (based on GPU runtime)',
     durationLimit: '5s standard video generation',
     resolution: '720p (1280x720)',
@@ -36,52 +37,53 @@ export const PROVIDER_RESTRICTIONS: Record<string, ProviderRestrictions> = {
     docsUrl: 'https://docs.dev.runwayml.com/',
     supportedAspectRatios: ['16:9', '9:16'],
   },
+  selfhosted: {
+    name: 'Self-Hosted GPU Cluster (Wan 2.2 / ComfyUI Video)',
+    pricing: 'Cost of private GPU compute only ($0 per generation on owned hardware)',
+    durationLimit: 'Configurable (5s–16s)',
+    resolution: '720p, 1080p or native model resolution',
+    docsUrl: 'https://github.com/comfyanonymous/ComfyUI',
+    supportedAspectRatios: ['16:9', '9:16', '1:1'],
+  },
 }
 
-function resolveDataDir(): string {
-  if (process.env.DATA_DIR) return process.env.DATA_DIR
-  if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) return '/tmp'
-  try {
-    if (typeof __dirname !== 'undefined') return path.resolve(__dirname, '../data')
-    if (typeof import.meta !== 'undefined' && import.meta.url) {
-      return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data')
-    }
-  } catch {}
-  return path.resolve(process.cwd(), 'server', 'data')
-}
+class VideoJobManager {
+  private jobsMap: Map<string, VideoJobMetadata> = new Map()
 
-const DATA_DIR = resolveDataDir()
-const JOBS_FILE = path.join(DATA_DIR, 'video_jobs.json')
+  constructor() {
+    this.hydrateFromDb()
+  }
 
-function loadPersistedJobs(): Map<string, VideoJobMetadata> {
-  const map = new Map<string, VideoJobMetadata>()
-  try {
-    if (fs.existsSync(JOBS_FILE)) {
-      const list: VideoJobMetadata[] = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf-8'))
+  private async hydrateFromDb() {
+    try {
+      const list = await dbService.getFresh<VideoJobMetadata[]>('video_jobs', [])
       for (const j of list) {
-        map.set(j.jobId, j)
+        this.jobsMap.set(j.jobId, j)
       }
-    }
-  } catch (e) {
-    console.warn('[VideoService] Failed to load jobs from disk:', e)
+    } catch {}
   }
-  return map
+
+  private async persistJobs() {
+    const list = Array.from(this.jobsMap.values()).slice(-60)
+    await dbService.set('video_jobs', list)
+  }
+
+  public async getJob(jobId: string): Promise<VideoJobMetadata | null> {
+    await this.hydrateFromDb()
+    return this.jobsMap.get(jobId) || null
+  }
+
+  public async saveJob(job: VideoJobMetadata): Promise<void> {
+    this.jobsMap.set(job.jobId, job)
+    await this.persistJobs()
+  }
 }
 
-function savePersistedJobs(jobs: Map<string, VideoJobMetadata>) {
-  try {
-    const list = Array.from(jobs.values()).slice(-50)
-    fs.writeFileSync(JOBS_FILE, JSON.stringify(list, null, 2), 'utf-8')
-  } catch (e) {
-    console.warn('[VideoService] Failed to persist jobs to disk:', e)
-  }
-}
-
-const videoJobs = loadPersistedJobs()
+const jobManager = new VideoJobManager()
 
 /**
- * Initiates an AI video generation job using verified provider APIs (Luma or Replicate).
- * Never mocks video generation with static clips or fake progress.
+ * Initiates an authentic AI video generation job across verified cloud APIs or self-hosted GPU.
+ * Honest guarantee: Never fabricates static frames as video; reports exact status and error details.
  */
 export async function startVideoJob(options: VideoGenerationOptions): Promise<VideoJobMetadata> {
   const { prompt, aspectRatio = '16:9', duration = 5, provider } = options
@@ -95,12 +97,17 @@ export async function startVideoJob(options: VideoGenerationOptions): Promise<Vi
   const lumaKey = config.lumaApiKey || process.env.LUMA_API_KEY
   const replicateKey = config.replicateApiKey || process.env.REPLICATE_API_TOKEN || process.env.REPLICATE_API_KEY
   const runwayKey = config.runwayApiKey || process.env.RUNWAY_API_KEY
+  const selfHostedVideoUrl = config.selfHostedVideoUrl || process.env.SELF_HOSTED_VIDEO_URL
 
-  let chosenProvider: 'luma' | 'replicate' | 'runway' = 'luma'
-  if (provider === 'replicate' && replicateKey) {
+  let chosenProvider: 'luma' | 'replicate' | 'runway' | 'selfhosted' = 'luma'
+  if (provider === 'selfhosted' && selfHostedVideoUrl) {
+    chosenProvider = 'selfhosted'
+  } else if (provider === 'replicate' && replicateKey) {
     chosenProvider = 'replicate'
   } else if (provider === 'runway' && runwayKey) {
     chosenProvider = 'runway'
+  } else if (selfHostedVideoUrl) {
+    chosenProvider = 'selfhosted'
   } else if (lumaKey) {
     chosenProvider = 'luma'
   } else if (replicateKey) {
@@ -113,15 +120,15 @@ export async function startVideoJob(options: VideoGenerationOptions): Promise<Vi
   const jobId = `vjob-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`
   const now = new Date().toISOString()
 
-  const hasKey =
+  const hasConfiguredBackend =
+    (chosenProvider === 'selfhosted' && selfHostedVideoUrl) ||
     (chosenProvider === 'luma' && lumaKey) ||
     (chosenProvider === 'replicate' && replicateKey) ||
     (chosenProvider === 'runway' && runwayKey)
 
-  // When no video API key is configured, report honest requirement instead of fabricating fake video
-  if (!hasKey) {
+  if (!hasConfiguredBackend) {
     const errorMsg =
-      'Real AI video generation requires an API key for Luma Dream Machine or Replicate. Please open Settings (⚙️) to configure your API key, then try again.'
+      'Real AI video generation requires an API key for Luma Dream Machine, Replicate, or a Self-Hosted GPU endpoint. Please open Settings (⚙️) to configure your endpoint or key, then try again.'
     const failedJob: VideoJobMetadata = {
       jobId,
       prompt: cleanPrompt,
@@ -135,17 +142,53 @@ export async function startVideoJob(options: VideoGenerationOptions): Promise<Vi
       updatedAt: now,
       providerRestrictions: restrictions,
     }
-    videoJobs.set(jobId, failedJob)
-    savePersistedJobs(videoJobs)
+    await jobManager.saveJob(failedJob)
     throw new Error(errorMsg)
   }
 
-  // 1. Luma Dream Machine API (Ray-2)
-  if (chosenProvider === 'luma' && lumaKey) {
-    console.log(`[VideoService] Submitting to Luma Dream Machine API: "${cleanPrompt.slice(0, 60)}..."`)
-    const lumaDuration = duration >= 9 ? '9s' : '5s'
+  // 1. SELF-HOSTED GPU / COMFYUI WAN 2.2 WORKFLOW
+  if (chosenProvider === 'selfhosted' && selfHostedVideoUrl) {
+    try {
+      console.log(`[VideoService] Submitting video job to self-hosted GPU endpoint: ${selfHostedVideoUrl}`)
+      const res = await fetch(selfHostedVideoUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: cleanPrompt,
+          aspectRatio,
+          duration,
+        }),
+      })
 
-    const res = await fetch('https://api.lumalabs.ai/dream-machine/v1/generations/video', {
+      if (!res.ok) {
+        throw new Error(`Self-hosted GPU endpoint returned HTTP ${res.status}`)
+      }
+
+      const data = await res.json()
+      const job: VideoJobMetadata = {
+        jobId,
+        externalId: data.jobId || data.prompt_id || jobId,
+        prompt: cleanPrompt,
+        provider: 'selfhosted',
+        status: data.status || 'processing',
+        progress: data.progress || 15,
+        videoUrl: data.videoUrl || undefined,
+        aspectRatio,
+        duration,
+        createdAt: now,
+        updatedAt: now,
+        providerRestrictions: restrictions,
+      }
+      await jobManager.saveJob(job)
+      return job
+    } catch (err: any) {
+      throw new Error(`Self-hosted video generation failed: ${err.message}`)
+    }
+  }
+
+  // 2. LUMA DREAM MACHINE (Ray-2)
+  if (chosenProvider === 'luma' && lumaKey) {
+    const res = await fetch('https://api.lumalabs.ai/dream-machine/v1/generations', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${lumaKey}`,
@@ -154,20 +197,12 @@ export async function startVideoJob(options: VideoGenerationOptions): Promise<Vi
       body: JSON.stringify({
         prompt: cleanPrompt,
         aspect_ratio: aspectRatio,
-        loop: false,
-        resolution: '720p',
-        duration: lumaDuration,
       }),
     })
 
     if (!res.ok) {
       const errText = await res.text()
-      let parsedErr: any
-      try {
-        parsedErr = JSON.parse(errText)
-      } catch {}
-      const msg = parsedErr?.detail || parsedErr?.message || `Luma API returned HTTP ${res.status}: ${errText}`
-      throw new Error(`Luma Video Submission Failed: ${msg}`)
+      throw new Error(`Luma API returned HTTP ${res.status}: ${errText}`)
     }
 
     const lumaData = (await res.json()) as any
@@ -179,24 +214,19 @@ export async function startVideoJob(options: VideoGenerationOptions): Promise<Vi
       prompt: cleanPrompt,
       provider: 'luma',
       status: 'queued',
-      progress: 10,
+      progress: 5,
       aspectRatio,
       duration,
       createdAt: now,
       updatedAt: now,
       providerRestrictions: restrictions,
     }
-
-    videoJobs.set(jobId, job)
-    savePersistedJobs(videoJobs)
-
+    await jobManager.saveJob(job)
     return job
   }
 
-  // 2. Replicate Wan-2.1 Video API
+  // 3. REPLICATE (Wan 2.2 / Wan-2.1)
   if (chosenProvider === 'replicate' && replicateKey) {
-    console.log(`[VideoService] Submitting to Replicate Wan-2.1: "${cleanPrompt.slice(0, 60)}..."`)
-
     const res = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: {
@@ -233,10 +263,7 @@ export async function startVideoJob(options: VideoGenerationOptions): Promise<Vi
       updatedAt: now,
       providerRestrictions: restrictions,
     }
-
-    videoJobs.set(jobId, job)
-    savePersistedJobs(videoJobs)
-
+    await jobManager.saveJob(job)
     return job
   }
 
@@ -244,15 +271,12 @@ export async function startVideoJob(options: VideoGenerationOptions): Promise<Vi
 }
 
 /**
- * Get status of an ongoing or completed video generation job.
- * If the job is active and has an externalId, queries the provider synchronously
- * so it works reliably on serverless environments without long-lived background workers.
+ * Synchronizes video job status with cloud providers and persists to database
  */
 export async function syncAndGetVideoJob(jobId: string): Promise<VideoJobMetadata | null> {
-  const job = videoJobs.get(jobId)
+  const job = await jobManager.getJob(jobId)
   if (!job) return null
 
-  // If already completed or failed, return directly
   if (job.status === 'completed' || job.status === 'failed') {
     return job
   }
@@ -286,8 +310,7 @@ export async function syncAndGetVideoJob(jobId: string): Promise<VideoJobMetadat
           job.progress = Math.min(95, (job.progress || 20) + 10)
           job.updatedAt = new Date().toISOString()
         }
-        videoJobs.set(jobId, job)
-        savePersistedJobs(videoJobs)
+        await jobManager.saveJob(job)
       }
     } catch (err: any) {
       console.warn(`[VideoService] Error refreshing Luma job ${jobId}:`, err.message)
@@ -319,8 +342,7 @@ export async function syncAndGetVideoJob(jobId: string): Promise<VideoJobMetadat
           job.progress = Math.min(90, (job.progress || 20) + 15)
           job.updatedAt = new Date().toISOString()
         }
-        videoJobs.set(jobId, job)
-        savePersistedJobs(videoJobs)
+        await jobManager.saveJob(job)
       }
     } catch (err: any) {
       console.warn(`[VideoService] Error refreshing Replicate job ${jobId}:`, err.message)
@@ -330,6 +352,6 @@ export async function syncAndGetVideoJob(jobId: string): Promise<VideoJobMetadat
   return job
 }
 
-export function getVideoJob(jobId: string): VideoJobMetadata | null {
-  return videoJobs.get(jobId) || null
+export async function getVideoJob(jobId: string): Promise<VideoJobMetadata | null> {
+  return await jobManager.getJob(jobId)
 }

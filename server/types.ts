@@ -25,6 +25,9 @@ export interface GeneratedImageMetadata {
   width?: number
   height?: number
   createdAt: string
+  negativePrompt?: string
+  seed?: number
+  base64Data?: string
 }
 
 export interface ProviderRestrictions {
@@ -39,7 +42,7 @@ export interface ProviderRestrictions {
 export interface VideoJobMetadata {
   jobId: string
   prompt: string
-  provider: 'luma' | 'replicate' | 'runway' | 'pollinations'
+  provider: 'luma' | 'replicate' | 'runway' | 'pollinations' | 'selfhosted'
   status: 'queued' | 'processing' | 'completed' | 'failed'
   progress: number
   videoUrl?: string
@@ -60,14 +63,19 @@ export interface AppConfig {
   geminiApiKey?: string
   openaiApiKey?: string
   groqApiKey?: string
+  huggingfaceApiKey?: string
   tavilyApiKey?: string
   serperApiKey?: string
   braveApiKey?: string
   lumaApiKey?: string
   replicateApiKey?: string
   runwayApiKey?: string
-  imageProvider?: 'openai' | 'pollinations'
-  videoProvider?: 'luma' | 'replicate' | 'runway'
+  selfHostedImageUrl?: string
+  selfHostedVideoUrl?: string
+  supabaseUrl?: string
+  supabaseAnonKey?: string
+  imageProvider?: 'openai' | 'pollinations' | 'huggingface' | 'selfhosted'
+  videoProvider?: 'luma' | 'replicate' | 'runway' | 'selfhosted'
   modelName: string
   systemPrompt: string
   maxShortSentences: number
@@ -98,54 +106,20 @@ export interface SearchEvidence {
   errorMessage?: string
 }
 
-export interface IntentClassification {
+export interface IntentInfo {
   needsSearch: boolean
   refinedQuery: string
   reason: string
-  category: 'news' | 'sports' | 'weather' | 'pricing' | 'tech_docs' | 'announcements' | 'time_sensitive' | 'general_knowledge' | 'coding' | 'creative' | 'other'
+  category: 'code' | 'news' | 'technical' | 'conversational' | 'factual' | 'general_knowledge' | 'weather' | 'finance'
   isDetailRequested: boolean
 }
 
-export interface MemoryItem {
-  id: string
-  category: 'personal' | 'preference' | 'correction' | 'project'
-  key: string
-  value: string
-  createdAt: string
-  updatedAt: string
-}
-
-export interface FeedbackItem {
-  id: string
-  messageId: string
-  prompt: string
-  response: string
-  rating: 'thumbs_up' | 'thumbs_down'
-  comment?: string
-  timestamp: string
-}
-
 export interface ChatMessage {
-  id: string
+  id?: string
   role: 'user' | 'assistant' | 'system'
   content: string
-  timestamp: number
-  mode?: ChatMode
-  image?: GeneratedImageMetadata
-  video?: VideoJobMetadata
-  isGeneratingMedia?: boolean
-  mediaError?: string
+  timestamp?: number
   searchEvidence?: SearchEvidence
   isSearchPerformed?: boolean
-  searchStatus?: string
-  tokensUsed?: number
   feedback?: 'thumbs_up' | 'thumbs_down'
-  documentsUsed?: string[]
-  reasoningMode?: 'fast' | 'thinking'
-  toolsUsed?: string[]
-}
-
-export interface StreamEvent {
-  type: 'search_start' | 'search_status' | 'search_results' | 'token' | 'memory_saved' | 'done' | 'error'
-  data: any
 }

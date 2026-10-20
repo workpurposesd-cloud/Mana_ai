@@ -118,12 +118,14 @@ export class ConfigService {
       'geminiApiKey',
       'openaiApiKey',
       'groqApiKey',
+      'huggingfaceApiKey',
       'tavilyApiKey',
       'serperApiKey',
       'braveApiKey',
       'lumaApiKey',
       'replicateApiKey',
       'runwayApiKey',
+      'supabaseAnonKey',
     ] as const
 
     const sanitizedPartial: Partial<AppConfig> = { ...partial }
@@ -160,12 +162,14 @@ export class ConfigService {
       geminiApiKey: c.geminiApiKey ? maskKey(c.geminiApiKey) : '',
       openaiApiKey: c.openaiApiKey ? maskKey(c.openaiApiKey) : '',
       groqApiKey: c.groqApiKey ? maskKey(c.groqApiKey) : '',
+      huggingfaceApiKey: c.huggingfaceApiKey ? maskKey(c.huggingfaceApiKey) : '',
       tavilyApiKey: c.tavilyApiKey ? maskKey(c.tavilyApiKey) : '',
       serperApiKey: c.serperApiKey ? maskKey(c.serperApiKey) : '',
       braveApiKey: c.braveApiKey ? maskKey(c.braveApiKey) : '',
       lumaApiKey: c.lumaApiKey ? maskKey(c.lumaApiKey) : '',
       replicateApiKey: c.replicateApiKey ? maskKey(c.replicateApiKey) : '',
       runwayApiKey: c.runwayApiKey ? maskKey(c.runwayApiKey) : '',
+      supabaseAnonKey: c.supabaseAnonKey ? maskKey(c.supabaseAnonKey) : '',
     }
   }
 }

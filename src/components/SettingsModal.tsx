@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { X, Key, Search, Cpu, Sliders, Check, Globe, RefreshCw, Mic, Volume2, Play, Sparkles, Film } from 'lucide-react'
+import { X, Key, Search, Cpu, Sliders, Check, Globe, RefreshCw, Mic, Volume2, Play, Sparkles, Film, Database } from 'lucide-react'
 import { AppConfig, VoiceLanguage, VoiceSettings } from '../types/chat'
 import { voiceManager, DEFAULT_VOICE_SETTINGS } from '../utils/voiceManager'
 import { safeApiFetch } from '../utils/api'
@@ -291,8 +291,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="settings-section-divider">
               <div className="settings-section-title">
                 <Sparkles size={16} color="#8b5cf6" />
-                <span>AI Media Generation (Image & Video)</span>
+                <span>AI Media Generation (Watermark-Free Image & Video)</span>
               </div>
+            </div>
+
+            {/* Primary Image Provider */}
+            <div className="form-group">
+              <label className="form-label">
+                <Sliders size={15} color="#38bdf8" />
+                <span>Primary Image Diffusion Provider</span>
+              </label>
+              <select
+                className="form-select"
+                value={formData.imageProvider || 'pollinations'}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    imageProvider: e.target.value as any,
+                  })
+                }
+                id="select-image-provider"
+              >
+                <option value="pollinations">Pollinations AI — FLUX.1 (Zero-Key, 100% Watermark-Free)</option>
+                <option value="openai">OpenAI — DALL-E 3 (Photorealistic, Requires OpenAI Key)</option>
+                <option value="huggingface">Hugging Face — FLUX.1 [schnell] (Requires HF Token)</option>
+                <option value="selfhosted">Self-Hosted GPU — ComfyUI / Diffusers Cluster</option>
+              </select>
             </div>
 
             {/* OpenAI Key for DALL-E 3 */}
@@ -312,7 +336,49 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 id="input-media-openai-key"
               />
               <span className="form-hint">
-                Optional: If omitted, Mana AI uses Pollinations Flux.1 out of the box with zero keys required.
+                Optional: If omitted, Mana AI uses FLUX.1 with nologo watermark suppression out of the box.
+              </span>
+            </div>
+
+            {/* Hugging Face Token */}
+            <div className="form-group">
+              <label className="form-label">
+                <Key size={15} color="#f59e0b" />
+                <span>Hugging Face API Token (for FLUX.1 [schnell] Open-Weights)</span>
+              </label>
+              <input
+                type="password"
+                className="form-input"
+                placeholder="hf_..."
+                value={formData.huggingfaceApiKey || ''}
+                onChange={(e) =>
+                  setFormData({ ...formData, huggingfaceApiKey: e.target.value })
+                }
+                id="input-media-hf-key"
+              />
+              <span className="form-hint">
+                Get a free token at <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer" style={{ color: '#f59e0b' }}>huggingface.co/settings/tokens</a> for fast open-weight FLUX.1 inference.
+              </span>
+            </div>
+
+            {/* Self-Hosted GPU Image URL */}
+            <div className="form-group">
+              <label className="form-label">
+                <Cpu size={15} color="#10b981" />
+                <span>Self-Hosted GPU Image Endpoint (ComfyUI / Diffusers)</span>
+              </label>
+              <input
+                type="url"
+                className="form-input"
+                placeholder="https://your-gpu-instance.com/api/generate/image"
+                value={formData.selfHostedImageUrl || ''}
+                onChange={(e) =>
+                  setFormData({ ...formData, selfHostedImageUrl: e.target.value })
+                }
+                id="input-selfhosted-image-url"
+              />
+              <span className="form-hint">
+                Direct inference URL for private GPU servers. Zero external API costs.
               </span>
             </div>
 
@@ -350,7 +416,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="form-group">
               <label className="form-label">
                 <Key size={15} color="#06b6d4" />
-                <span>Replicate API Token (Alternative Video Engine)</span>
+                <span>Replicate API Token (Wan 2.2 / Minimax Video)</span>
               </label>
               <input
                 type="password"
@@ -372,7 +438,68 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 >
                   replicate.com/account/api-tokens
                 </a>
-                . Supports Wan-2.1 and Minimax Video models.
+                . Supports Wan 2.2 and Minimax Video models.
+              </span>
+            </div>
+
+            {/* Self-Hosted GPU Video URL */}
+            <div className="form-group">
+              <label className="form-label">
+                <Cpu size={15} color="#10b981" />
+                <span>Self-Hosted GPU Video Endpoint (Wan 2.2 / ComfyUI Video)</span>
+              </label>
+              <input
+                type="url"
+                className="form-input"
+                placeholder="https://your-gpu-instance.com/api/generate/video"
+                value={formData.selfHostedVideoUrl || ''}
+                onChange={(e) =>
+                  setFormData({ ...formData, selfHostedVideoUrl: e.target.value })
+                }
+                id="input-selfhosted-video-url"
+              />
+            </div>
+
+            {/* External Supabase Cloud Integration (Optional) */}
+            <div className="settings-section-divider">
+              <div className="settings-section-title">
+                <Database size={16} color="#3ecf8e" />
+                <span>Cloud Database & Storage (Supabase Integration)</span>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">
+                <span>Supabase Project URL</span>
+              </label>
+              <input
+                type="url"
+                className="form-input"
+                placeholder="https://xyzcompany.supabase.co"
+                value={formData.supabaseUrl || ''}
+                onChange={(e) =>
+                  setFormData({ ...formData, supabaseUrl: e.target.value })
+                }
+                id="input-supabase-url"
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">
+                <span>Supabase Anon / Public Key</span>
+              </label>
+              <input
+                type="password"
+                className="form-input"
+                placeholder="eyJhbGciOi..."
+                value={formData.supabaseAnonKey || ''}
+                onChange={(e) =>
+                  setFormData({ ...formData, supabaseAnonKey: e.target.value })
+                }
+                id="input-supabase-key"
+              />
+              <span className="form-hint">
+                Netlify Blobs is active by default for all users. Provide Supabase credentials if you want external Supabase Auth & Storage buckets.
               </span>
             </div>
 

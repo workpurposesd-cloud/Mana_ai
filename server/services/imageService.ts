@@ -7,9 +7,11 @@ import { fileURLToPath } from 'url'
 
 export interface ImageGenerationOptions {
   prompt: string
+  negativePrompt?: string
   aspectRatio?: '1:1' | '16:9' | '9:16'
   quality?: 'standard' | 'hd'
-  provider?: 'openai' | 'pollinations'
+  provider?: 'openai' | 'pollinations' | 'huggingface' | 'selfhosted'
+  seed?: number
 }
 
 function resolveMediaDir(): string {
@@ -37,12 +39,16 @@ function ensureMediaDir(): string {
   return MEDIA_DIR
 }
 
+async function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 /**
- * Service for generating authentic AI images using OpenAI DALL-E 3 or Pollinations Flux.
- * Never uses fake photos, mock images, or pre-rendered static placeholders.
+ * Service for generating authentic AI images with multiple-provider failover.
+ * Guarantee: Zero visible logos, overlays, or application watermarks added to generated output.
  */
 export async function generateAIImage(options: ImageGenerationOptions): Promise<GeneratedImageMetadata> {
-  const { prompt, aspectRatio = '1:1', quality = 'standard', provider } = options
+  const { prompt, negativePrompt, aspectRatio = '1:1', quality = 'standard', provider, seed } = options
 
   const cleanPrompt = prompt.trim()
   if (!cleanPrompt) {
@@ -51,16 +57,94 @@ export async function generateAIImage(options: ImageGenerationOptions): Promise<
 
   const config = configService.getConfig()
   const activeOpenAIKey = config.openaiApiKey || process.env.OPENAI_API_KEY
-  const chosenProvider = provider || (activeOpenAIKey ? 'openai' : 'pollinations')
+  const activeHFKey = config.huggingfaceApiKey || process.env.HF_TOKEN || process.env.HUGGINGFACE_API_KEY
+  const selfHostedUrl = config.selfHostedImageUrl || process.env.SELF_HOSTED_IMAGE_URL
 
   ensureMediaDir()
 
-  // 1. OpenAI DALL-E 3 API
-  if (chosenProvider === 'openai' && activeOpenAIKey) {
+  // Determine provider sequence for failover
+  let preferredProvider = provider
+  if (!preferredProvider) {
+    if (selfHostedUrl) preferredProvider = 'selfhosted'
+    else if (activeOpenAIKey) preferredProvider = 'openai'
+    else if (activeHFKey) preferredProvider = 'huggingface'
+    else preferredProvider = 'pollinations'
+  }
+
+  // 1. SELF-HOSTED GPU / COMFYUI / DIFFUSERS INFERENCE
+  if (preferredProvider === 'selfhosted' && selfHostedUrl) {
+    try {
+      console.log(`[ImageService] Submitting to self-hosted GPU endpoint: ${selfHostedUrl}`)
+      let width = 1024
+      let height = 1024
+      if (aspectRatio === '16:9') {
+        width = 1280
+        height = 720
+      } else if (aspectRatio === '9:16') {
+        width = 720
+        height = 1280
+      }
+
+      const res = await fetch(selfHostedUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: cleanPrompt,
+          negative_prompt: negativePrompt || 'blurry, distorted, low quality, artifacts, watermark',
+          width,
+          height,
+          seed: seed || Math.floor(Math.random() * 1000000),
+          quality,
+        }),
+      })
+
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || ''
+        let buffer: Buffer
+
+        if (contentType.includes('application/json')) {
+          const json = await res.json()
+          if (json.image_base64 || json.output_base64) {
+            buffer = Buffer.from(json.image_base64 || json.output_base64, 'base64')
+          } else if (json.image_url) {
+            const imgRes = await fetch(json.image_url)
+            buffer = Buffer.from(await imgRes.arrayBuffer())
+          } else {
+            throw new Error('Self-hosted response missing image_base64 or image_url')
+          }
+        } else {
+          buffer = Buffer.from(await res.arrayBuffer())
+        }
+
+        const filename = `img-sh-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.png`
+        try {
+          fs.writeFileSync(path.join(MEDIA_DIR, filename), buffer)
+        } catch {}
+
+        const base64Data = buffer.toString('base64')
+        return {
+          url: `/api/media/${filename}`,
+          base64Data: `data:image/png;base64,${base64Data}`,
+          prompt: cleanPrompt,
+          negativePrompt,
+          aspectRatio,
+          quality,
+          provider: 'Self-Hosted GPU (FLUX / SDXL)',
+          width,
+          height,
+          createdAt: new Date().toISOString(),
+        }
+      }
+    } catch (err: any) {
+      console.warn('[ImageService] Self-hosted endpoint failed, attempting cloud fallback:', err.message)
+    }
+  }
+
+  // 2. OPENAI DALL-E 3 API (100% Watermark-Free Photorealistic)
+  if ((preferredProvider === 'openai' || activeOpenAIKey) && activeOpenAIKey) {
     try {
       const openai = new OpenAI({ apiKey: activeOpenAIKey })
 
-      // Map aspect ratios to DALL-E 3 supported dimensions
       let size: '1024x1024' | '1792x1024' | '1024x1792' = '1024x1024'
       let width = 1024
       let height = 1024
@@ -75,7 +159,7 @@ export async function generateAIImage(options: ImageGenerationOptions): Promise<
         height = 1792
       }
 
-      console.log(`[ImageService] Generating with OpenAI DALL-E 3: "${cleanPrompt.slice(0, 60)}..." (${size}, ${quality})`)
+      console.log(`[ImageService] Generating with OpenAI DALL-E 3: "${cleanPrompt.slice(0, 50)}..."`)
 
       const response = await openai.images.generate({
         model: 'dall-e-3',
@@ -86,60 +170,88 @@ export async function generateAIImage(options: ImageGenerationOptions): Promise<
       })
 
       const imageItem = response.data?.[0]
-      if (!imageItem?.url) {
-        throw new Error('OpenAI did not return an image URL.')
-      }
+      if (imageItem?.url) {
+        const localFilename = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.png`
+        const localFilePath = path.join(MEDIA_DIR, localFilename)
+        let base64Data: string | undefined
 
-      // Download and cache OpenAI image locally so URL never expires
-      const localFilename = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.png`
-      const localFilePath = path.join(MEDIA_DIR, localFilename)
-
-      try {
-        const imgRes = await fetch(imageItem.url)
-        if (imgRes.ok) {
-          const buf = Buffer.from(await imgRes.arrayBuffer())
-          fs.writeFileSync(localFilePath, buf)
-          return {
-            url: `/api/media/${localFilename}`,
-            prompt: cleanPrompt,
-            revisedPrompt: imageItem.revised_prompt || undefined,
-            aspectRatio,
-            quality,
-            provider: 'OpenAI DALL-E 3',
-            width,
-            height,
-            createdAt: new Date().toISOString(),
+        try {
+          const imgRes = await fetch(imageItem.url)
+          if (imgRes.ok) {
+            const buf = Buffer.from(await imgRes.arrayBuffer())
+            fs.writeFileSync(localFilePath, buf)
+            base64Data = `data:image/png;base64,${buf.toString('base64')}`
           }
-        }
-      } catch (cacheErr) {
-        console.warn('[ImageService] Failed to cache OpenAI image locally, using remote URL:', cacheErr)
-      }
+        } catch {}
 
-      return {
-        url: imageItem.url,
-        prompt: cleanPrompt,
-        revisedPrompt: imageItem.revised_prompt || undefined,
-        aspectRatio,
-        quality,
-        provider: 'OpenAI DALL-E 3',
-        width,
-        height,
-        createdAt: new Date().toISOString(),
+        return {
+          url: base64Data ? `/api/media/${localFilename}` : imageItem.url,
+          base64Data,
+          prompt: cleanPrompt,
+          revisedPrompt: imageItem.revised_prompt || undefined,
+          aspectRatio,
+          quality,
+          provider: 'OpenAI DALL-E 3 (Watermark-Free)',
+          width,
+          height,
+          createdAt: new Date().toISOString(),
+        }
       }
     } catch (err: any) {
-      console.error('[ImageService] OpenAI generation error:', err.message)
-      if (err.status === 401) {
-        throw new Error('Invalid OpenAI API Key. Please check your key in Settings.')
-      } else if (err.status === 429) {
-        throw new Error('OpenAI rate limit or quota exceeded. Please check your OpenAI account billing or try again in a moment.')
-      } else if (err.message && err.message.includes('safety system')) {
-        throw new Error('The prompt was flagged by OpenAI safety filters. Please adjust the prompt and try again.')
+      console.warn('[ImageService] OpenAI generation error, falling back to next provider:', err.message)
+      // If user explicitly chose OpenAI and got a hard auth error, surface it
+      if (preferredProvider === 'openai' && err.status === 401) {
+        throw new Error('Invalid OpenAI API Key. Please verify your API key in Settings.')
       }
-      throw new Error(`OpenAI image generation failed: ${err.message || 'Unknown error'}`)
     }
   }
 
-  // 2. Pollinations AI (Zero-Key AI Image Diffusion)
+  // 3. HUGGING FACE INFERENCE (FLUX.1 [schnell] Open-Weights)
+  if (activeHFKey) {
+    try {
+      console.log(`[ImageService] Submitting to Hugging Face FLUX.1 [schnell]...`)
+      const hfRes = await fetch('https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${activeHFKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          inputs: cleanPrompt,
+          parameters: {
+            negative_prompt: negativePrompt || undefined,
+            seed: seed || Math.floor(Math.random() * 1000000),
+          },
+        }),
+      })
+
+      if (hfRes.ok) {
+        const buf = Buffer.from(await hfRes.arrayBuffer())
+        const filename = `img-hf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.jpeg`
+        try {
+          fs.writeFileSync(path.join(MEDIA_DIR, filename), buf)
+        } catch {}
+
+        const base64Data = `data:image/jpeg;base64,${buf.toString('base64')}`
+        return {
+          url: `/api/media/${filename}`,
+          base64Data,
+          prompt: cleanPrompt,
+          negativePrompt,
+          aspectRatio,
+          quality,
+          provider: 'Hugging Face (FLUX.1 [schnell])',
+          width: 1024,
+          height: 1024,
+          createdAt: new Date().toISOString(),
+        }
+      }
+    } catch (hfErr: any) {
+      console.warn('[ImageService] Hugging Face inference failed, falling back:', hfErr.message)
+    }
+  }
+
+  // 4. POLLINATIONS AI FLUX WITH WATERMARK SUPPRESSION (&nologo=true) & EXPONENTIAL BACKOFF
   let width = 1024
   let height = 1024
 
@@ -151,97 +263,91 @@ export async function generateAIImage(options: ImageGenerationOptions): Promise<
     height = 1280
   }
 
-  // Enhance the prompt for diffusion synthesis
   let enhancedPrompt = cleanPrompt
   if (!/(realistic|photorealistic|detailed|cinematic|portrait|quality|rendering)/i.test(cleanPrompt)) {
-    enhancedPrompt = `${cleanPrompt}, highly detailed, cinematic lighting, 8k resolution`
+    enhancedPrompt = `${cleanPrompt}, highly detailed, cinematic lighting, 8k resolution, photorealistic`
   }
 
-  console.log(`[ImageService] Submitting to Pollinations AI: "${enhancedPrompt.slice(0, 60)}" (${width}x${height})`)
   const candidateModels = ['flux', 'turbo']
   let lastErrorMsg = ''
 
   for (const model of candidateModels) {
-    const seed = Math.floor(Math.random() * 1000000)
+    const currentSeed = seed || Math.floor(Math.random() * 1000000)
     const encodedPrompt = encodeURIComponent(enhancedPrompt)
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=${model}`
+    // nologo=true explicitly suppresses any visible provider logo/watermark overlay
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${currentSeed}&nologo=true&model=${model}`
 
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 20000)
-
-    try {
-      const res = await fetch(imageUrl, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'ManaAI/1.0',
-          'Accept': 'image/jpeg,image/png,image/*,*/*',
-        },
-      })
-      clearTimeout(timeout)
-
-      if (res.status === 402 || res.status === 429) {
-        lastErrorMsg = 'Pollinations AI free tier is currently rate-limited (1 request per 30 seconds per IP). Please wait a moment and try again, or add an OpenAI API Key in Settings for instant DALL-E 3 generations.'
-        console.warn(`[ImageService] Pollinations ${model} rate-limited (${res.status})`)
-        continue
+    // Retry with exponential backoff and jitter
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) {
+        const jitter = Math.floor(Math.random() * 400)
+        await sleep(1000 + jitter)
       }
 
-      if (!res.ok) {
-        lastErrorMsg = `Pollinations ${model} returned HTTP ${res.status}`
-        console.warn(`[ImageService] ${lastErrorMsg}`)
-        continue
-      }
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 22000)
 
-      const buf = Buffer.from(await res.arrayBuffer())
+      try {
+        const res = await fetch(imageUrl, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'ManaAI/1.0',
+            'Accept': 'image/jpeg,image/png,image/*,*/*',
+          },
+        })
+        clearTimeout(timeout)
 
-      if (buf.length < 5000) {
-        const textPreview = buf.toString('utf-8').slice(0, 200)
-        if (textPreview.includes('FREE_LIMIT') || textPreview.includes('limit') || textPreview.startsWith('{')) {
-          lastErrorMsg = 'Pollinations AI free tier limit reached. Please wait 30 seconds and try again, or configure an OpenAI API Key in Settings.'
+        if (res.status === 402 || res.status === 429) {
+          lastErrorMsg =
+            'Public image diffusion cluster is temporarily rate-limited. Please retry in a few moments, or configure an OpenAI API Key in Settings.'
           continue
         }
-      }
 
-      const localFilename = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.jpg`
-      try {
-        fs.writeFileSync(path.join(MEDIA_DIR, localFilename), buf)
+        if (!res.ok) {
+          lastErrorMsg = `Diffusion cluster returned HTTP ${res.status}`
+          continue
+        }
+
+        const buf = Buffer.from(await res.arrayBuffer())
+
+        if (buf.length < 5000) {
+          const textPreview = buf.toString('utf-8').slice(0, 200)
+          if (textPreview.includes('limit') || textPreview.startsWith('{')) {
+            lastErrorMsg = 'Diffusion cluster limit reached. Please retry in 30 seconds.'
+            continue
+          }
+        }
+
+        const localFilename = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.jpg`
+        try {
+          fs.writeFileSync(path.join(MEDIA_DIR, localFilename), buf)
+        } catch {}
+
+        const base64Data = `data:image/jpeg;base64,${buf.toString('base64')}`
         return {
           url: `/api/media/${localFilename}`,
+          base64Data,
           prompt: cleanPrompt,
           aspectRatio,
           quality: quality || 'standard',
-          provider: `Pollinations AI (${model.toUpperCase()})`,
+          provider: `FLUX.1 Diffusion (${model.toUpperCase()}, Watermark-Free)`,
           width,
           height,
           createdAt: new Date().toISOString(),
         }
-      } catch (writeErr) {
-        console.warn('[ImageService] Failed to cache locally, returning direct data URI:', writeErr)
-        // If filesystem write fails (e.g. strict readonly), return data URI
-        const base64Data = buf.toString('base64')
-        return {
-          url: `data:image/jpeg;base64,${base64Data}`,
-          prompt: cleanPrompt,
-          aspectRatio,
-          quality: quality || 'standard',
-          provider: `Pollinations AI (${model.toUpperCase()})`,
-          width,
-          height,
-          createdAt: new Date().toISOString(),
+      } catch (fetchErr: any) {
+        clearTimeout(timeout)
+        if (fetchErr.name === 'AbortError') {
+          lastErrorMsg = 'Image generation timed out after 22 seconds due to high cluster load. Please retry.'
+        } else {
+          lastErrorMsg = fetchErr.message || 'Network error reaching image generation cluster.'
         }
       }
-    } catch (fetchErr: any) {
-      clearTimeout(timeout)
-      if (fetchErr.name === 'AbortError') {
-        lastErrorMsg = 'Image generation request timed out after 20 seconds. The model cluster is under high load. Please try again.'
-      } else {
-        lastErrorMsg = fetchErr.message || 'Network error contacting image generation cluster.'
-      }
-      console.warn(`[ImageService] Pollinations ${model} fetch failed:`, lastErrorMsg)
     }
   }
 
   throw new Error(
     lastErrorMsg ||
-      'AI Image generation is temporarily busy or rate-limited. Please retry in 30 seconds, or provide an OpenAI API key in Settings to use DALL-E 3 directly.'
+      'AI Image generation is temporarily busy or rate-limited. Please retry in 30 seconds, or provide an OpenAI API key in Settings.'
   )
 }

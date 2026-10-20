@@ -40,6 +40,9 @@ export interface GeneratedImageMetadata {
   width?: number
   height?: number
   createdAt: string
+  negativePrompt?: string
+  seed?: number
+  base64Data?: string
 }
 
 export interface ProviderRestrictions {
@@ -54,7 +57,7 @@ export interface ProviderRestrictions {
 export interface VideoJobMetadata {
   jobId: string
   prompt: string
-  provider: 'luma' | 'replicate' | 'runway' | 'pollinations'
+  provider: 'luma' | 'replicate' | 'runway' | 'pollinations' | 'selfhosted'
   status: 'queued' | 'processing' | 'completed' | 'failed'
   progress: number
   videoUrl?: string
@@ -143,14 +146,19 @@ export interface AppConfig {
   geminiApiKey?: string
   openaiApiKey?: string
   groqApiKey?: string
+  huggingfaceApiKey?: string
   tavilyApiKey?: string
   serperApiKey?: string
   braveApiKey?: string
   lumaApiKey?: string
   replicateApiKey?: string
   runwayApiKey?: string
-  imageProvider?: 'openai' | 'pollinations'
-  videoProvider?: 'luma' | 'replicate' | 'runway'
+  selfHostedImageUrl?: string
+  selfHostedVideoUrl?: string
+  supabaseUrl?: string
+  supabaseAnonKey?: string
+  imageProvider?: 'openai' | 'pollinations' | 'huggingface' | 'selfhosted'
+  videoProvider?: 'luma' | 'replicate' | 'runway' | 'selfhosted'
   modelName: string
   systemPrompt: string
   maxShortSentences: number
@@ -159,4 +167,3 @@ export interface AppConfig {
   memoryEnabled?: boolean
   voiceSettings?: VoiceSettings
 }
-
