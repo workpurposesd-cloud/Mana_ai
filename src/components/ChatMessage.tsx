@@ -83,59 +83,22 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 
         {/* Metadata badges (Reasoning mode & Knowledge documents cited & Speed) */}
         {!isUser && (message.reasoningMode === 'thinking' || (message.documentsUsed && message.documentsUsed.length > 0) || message.timings?.ttftMs) && (
-          <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+          <div className="mana-meta-badges">
             {message.timings?.ttftMs && (
               <span
-                style={{
-                  fontSize: '0.72rem',
-                  padding: '2px 8px',
-                  borderRadius: '12px',
-                  background: 'rgba(34, 197, 94, 0.12)',
-                  border: '1px solid rgba(34, 197, 94, 0.3)',
-                  color: '#86efac',
-                  fontWeight: 500,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                }}
+                className="mana-meta-badge timing"
                 title={`Time to first token: ${message.timings.ttftMs}ms${message.timings.totalMs ? ` | Total: ${message.timings.totalMs}ms` : ''}`}
               >
                 ⚡ {message.timings.ttftMs}ms
               </span>
             )}
             {message.reasoningMode === 'thinking' && (
-              <span
-                style={{
-                  fontSize: '0.72rem',
-                  padding: '2px 8px',
-                  borderRadius: '12px',
-                  background: 'rgba(139, 92, 246, 0.15)',
-                  border: '1px solid rgba(139, 92, 246, 0.35)',
-                  color: '#c4b5fd',
-                  fontWeight: 500,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                }}
-              >
+              <span className="mana-meta-badge thinking">
                 🧠 Deep Reasoning
               </span>
             )}
             {message.documentsUsed && message.documentsUsed.length > 0 && (
-              <span
-                style={{
-                  fontSize: '0.72rem',
-                  padding: '2px 8px',
-                  borderRadius: '12px',
-                  background: 'rgba(14, 165, 233, 0.15)',
-                  border: '1px solid rgba(14, 165, 233, 0.35)',
-                  color: '#7dd3fc',
-                  fontWeight: 500,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                }}
-              >
+              <span className="mana-meta-badge docs">
                 📄 {message.documentsUsed.length} {message.documentsUsed.length === 1 ? 'doc' : 'docs'} cited: {message.documentsUsed.join(', ')}
               </span>
             )}
@@ -149,7 +112,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
               className="chatgpt-sources-toggle"
               onClick={() => setShowSources(!showSources)}
             >
-              <Globe size={14} color="#38bdf8" />
+              <Globe size={14} />
               <span>{message.searchEvidence.results.length} sources</span>
               {showSources ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
             </button>
@@ -418,10 +381,10 @@ const TextMarkdownBlock: React.FC<{ text: string }> = ({ text }) => {
             <blockquote
               key={pIdx}
               style={{
-                borderLeft: '3px solid var(--accent-purple, #8b5cf6)',
+                borderLeft: '3px solid var(--border-active, #171717)',
                 paddingLeft: '0.8rem',
                 margin: '0.6rem 0',
-                color: '#cbd5e1',
+                color: 'var(--text-muted, #6B7280)',
                 fontStyle: 'italic',
               }}
             >
@@ -464,7 +427,7 @@ const TextMarkdownBlock: React.FC<{ text: string }> = ({ text }) => {
               style={{
                 overflowX: 'auto',
                 margin: '0.8rem 0',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
+                border: '1px solid var(--border-subtle, #e5e7eb)',
                 borderRadius: '8px',
               }}
             >
@@ -476,16 +439,16 @@ const TextMarkdownBlock: React.FC<{ text: string }> = ({ text }) => {
                 }}
               >
                 <thead>
-                  <tr style={{ background: 'rgba(255, 255, 255, 0.05)' }}>
+                  <tr style={{ background: 'var(--bg-hover, #f1f1f1)' }}>
                     {headerCells.map((h, hIdx) => (
                       <th
                         key={hIdx}
                         style={{
                           padding: '8px 12px',
                           textAlign: 'left',
-                          borderBottom: '1px solid rgba(255, 255, 255, 0.15)',
+                          borderBottom: '1px solid var(--border-subtle, #e5e7eb)',
                           fontWeight: 600,
-                          color: '#e2e8f0',
+                          color: 'var(--text-main, #171717)',
                         }}
                       >
                         {renderInlineMarkdown(h)}
@@ -500,7 +463,7 @@ const TextMarkdownBlock: React.FC<{ text: string }> = ({ text }) => {
                       style={{
                         borderBottom:
                           rIdx < dataRows.length - 1
-                            ? '1px solid rgba(255, 255, 255, 0.05)'
+                            ? '1px solid var(--border-subtle, #e5e7eb)'
                             : 'none',
                       }}
                     >
@@ -509,7 +472,7 @@ const TextMarkdownBlock: React.FC<{ text: string }> = ({ text }) => {
                           key={cIdx}
                           style={{
                             padding: '8px 12px',
-                            color: '#cbd5e1',
+                            color: 'var(--text-main, #171717)',
                           }}
                         >
                           {renderInlineMarkdown(cell)}

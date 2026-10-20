@@ -499,7 +499,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 id="input-supabase-key"
               />
               <span className="form-hint">
-                Netlify Blobs is active by default for all users. Provide Supabase credentials if you want external Supabase Auth & Storage buckets.
+                Cloud synchronization is active by default for all users. Provide Supabase credentials if you want external Supabase Auth & Storage buckets.
               </span>
             </div>
 

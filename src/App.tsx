@@ -1029,7 +1029,7 @@ export const App: React.FC = () => {
               <h1 className="empty-state-title">
                 {currentUser?.name ? `Hey, ${currentUser.name}!` : "What's on your mind?"}
               </h1>
-              <p style={{ color: '#94a3b8', fontSize: '0.92rem', marginTop: '-0.5rem' }}>
+              <p className="empty-state-subtitle">
                 Your AI. Your World.
               </p>
             </div>

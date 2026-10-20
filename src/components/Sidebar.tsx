@@ -172,7 +172,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Memory shortcut */}
           <div className="sidebar-group" style={{ marginTop: 'auto', paddingTop: '0.5rem' }}>
             <button className="chat-history-item memory-item" onClick={onOpenMemory}>
-              <Brain size={15} color="#8b5cf6" />
+              <Brain size={15} />
               <span className="chat-title">Mana's Memory & Preferences</span>
             </button>
           </div>
