@@ -116,12 +116,12 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
     }
   }
 
-  // 3. For authentic conversational Teluglish, Rayalaseema buddy banter, and chit-chat:
-  // Deliver authentic local Rayalaseema personality directly to avoid third-party LLM
+  // 3. For authentic conversational Teluglish, Andhra village friend banter, and chit-chat:
+  // Deliver authentic local Andhra Pradesh village personality directly to avoid third-party LLM
   // translation hallucinations (e.g. "Bottakokane") and external 429 rate limits.
   const isConversationalTeluglish =
     /[\u0C00-\u0C7F]/.test(cleanPrompt) ||
-    /\b(nenu inka bathike unna|inka bathike unna|bathike unna|bathiki unna|nenu unna|chachipoledu|chavaledu|em chestunnav|em chesthunnav|em peekuthunnav|ela unnav|ela unnaru|bavunnava|bagunnava|kushalama|thinnava|tinnava|bhojanam|bore kodutondi|bore kottiddi|chala bore|bore mama|nidra vastondi|padukuntunna|nidra potunna|ippude lecha|lecha mama|cheppu mama|cheppu ra|orey mama|enti ra mama|em scene|em sangathi|ayyo ra|lite theesko|dobbey|po ra|musukoni|sare mama|avuna mama|nijama|kaburlu|sollu|visugu|mood ledu|mood off|tension ga undi|kashtam ga undi|hello hay|hello hey|wassup|what's up|whats up|how are you|how r u|i'm bored|im bored|teach me (common )?(english )?(bad|swear|curse) words)\b/i.test(cleanPrompt)
+    /\b(nenu inka bathike unna|inka bathike unna|bathike unna|bathiki unna|nenu unna|chachipoledu|chavaledu|em chestunnav|em chesthunnav|em peekuthunnav|ela unnav|ela unnaru|bavunnava|bagunnava|kushalama|thinnava|tinnava|bhojanam|bore kodutondi|bore kottiddi|chala bore|bore mama|nidra vastondi|padukuntunna|nidra potunna|ippude lecha|lecha mama|cheppu mama|cheppu ra|orey mama|enti ra mama|em scene|em sangathi|ayyo ra|lite theesko|dobbey|po ra|musukoni|sare mama|avuna mama|nijama|kaburlu|sollu|visugu|mood ledu|mood off|tension ga undi|kashtam ga undi|hello hay|hello hey|wassup|what's up|whats up|how are you|how r u|i'm bored|im bored|teach me (common )?(english )?(bad|swear|curse) words|puka|chetha na kodaka|lamidi lodaka|bokka|dunnapotha|waste fellow|health problem|chest pain|hospital|financial|loan|emi|git push|netlify|java|mama|orey|arey|babu|saami|marchipoya|delete chesa|commit cheyyakunda)\b/i.test(cleanPrompt)
 
   if (isConversationalTeluglish && (!activeGeminiKey && !config.openaiApiKey && !config.groqApiKey)) {
     return await generateContextualSmartResponse(
@@ -345,11 +345,148 @@ async function generateContextualSmartResponse(
     answer = `👋 Orey ${name}! Awesome to meet you mama! 😊 Saved your name in memory, so I won't forget. Cheppu ra, what's on your mind today?`
   }
 
+  // 1a. SERIOUS HEALTH & MEDICAL CONCERNS (COMPASSIONATE & EMPATHETIC - STRICTLY ZERO JOKES OR SWEARING)
+  else if (/\b(health problem|health issue|heart attack|chest pain|breathing problem|fever taggatledhu|sick ga unna|hospital|hospitalized|doctor|illness|severe pain|bleeding|intlo.*health|father.*health|mother.*health|nanna.*health|amma.*health)\b/i.test(lower)) {
+    answer = `Arey mama, ardham ayyindhi ra. Mundhu nuvvu konchem calm avvu. Em jarigindho cheppu, step by step chuddam. Serious symptoms unte matram doctor ni delay cheyyakudadhu ra. Nenunnanu ga nee thodu, tension padaku. Exact ga em symptoms unnayo cheppu, help cheddam.`
+  }
+
+  // 1b. SERIOUS FINANCIAL PROBLEMS (SUPPORTIVE & PRACTICAL - STRICTLY ZERO ROASTING)
+  else if (/\b(loan|loans|emi|debt|debts|financial crisis|financial problem|financial stress|appulu|kattaleka|money problem|paikalu levu|no money|bankruptcy|salaries not paid|bank recovery)\b/i.test(lower)) {
+    answer = `Arey mama, tension padaku. First calm avvu, chusukundham. Financial stress unappudu panic aithe em labham ledu ra. Step by step plan cheddam:
+
+1. **High-Interest Debts First**: Credit cards or private high-interest loans unte vatini first prioritize cheyyi.
+2. **Cut Discretionary Spending**: Ee 2-3 months subscriptions, outside dining, and non-essential expenses strictly pause cheyyi.
+3. **Restructure EMIs**: Bank vallatho matladi loan tenure extend cheyyamanu, monthly EMI burden thagguthundi.
+4. **Additional Cash Flow**: Side gig or freelancing dwara small temporary income source build cheddam.
+
+Nenunnanu mama, step by step clear cheddam ra. Exact ga entha amount & em loans unnay, cheppu workout cheddam.`
+  }
+
+  // 1c. FRIENDLY ROASTING AFTER A HARMLESS MISTAKE
+  else if (/\b(marchipoya|marchipoyanu|delete chesa|delete chesesa|bokka pettesa|thappu chesa|commit cheyyakunda|phone intlo|office ki vachesa|accidentally deleted|lost my keys|forgot to|woke up late|planning fail)\b/i.test(lower)) {
+    answer = `Arey babu, idhi kuda marchipoyava ra chetha na kodaka😂 Oreyy, nee planning ki oka award ivvali ra babu lamidi lodaka 🤣! Sare aagu ra babu, mundhu problem ekkada undo chuddam, tension padaku. Exact ga em ayyindo cheppu, fix cheddam!`
+  }
+
+  // 1d. WITTY COMEBACK TO AN INSULT OR TEASING
+  else if (/\b(waste fellow|neeku em thelusu|neeku em radhu|dunnapotha|bokka lo ai|gadidha|vedhava)\b/i.test(lower)) {
+    answer = `Rey rey mama 😂😂 nannu waste fellow antunnav choodu! Naaku thelisindi antha chepthe nee burra heat yekki blast aipoddi ra lamidi lodaka! 🤣 Best friends madhya ee level prema & roasting undalsinde! Sare kani sollu aapi cheppu, em scene? Ekkada irukkunnav? 👊`
+  }
+
+  // 1e. ENGLISH-ONLY REQUEST (NO TELUGU WORDS, CASUAL BUDDY VIBE)
+  else if (/^(talk|speak|reply|chat)\s+(only\s+)?in\s+english\b/i.test(lower) || /\b(speak|talk|reply)\s+(only\s+)?in\s+english\b/i.test(lower)) {
+    answer = `Got it bro! 😂 English only from here on. No problem at all! Tell me what's on your mind and let's get straight to work! What are we sorting out today?`
+  }
+
+  // 1f. GIT TROUBLESHOOTING (VILLAGE FRIEND OPENER + 100% ACCURATE FIX)
+  else if (/\b(git push|rejected.*non-fast-forward|failed to push|git conflict|git merge conflict)\b/i.test(lower)) {
+    answer = `Arey mama 😂 malli Git tho fight aa? Sare, error message pettu ra. First \`git status\` run cheddham, tarvatha exact problem pattukundham!
+
+Non-fast-forward error ante remote repository lo evaro commits push chesaru (or nuvve vere machine nundi push chesav), so nee local branch behind undi ani ardam ra.
+
+Chudu mama, simple ga 3 steps lo fix cheddam:
+
+\`\`\`bash
+# 1. Fetch latest changes from remote
+git fetch origin
+
+# 2. Rebase or pull remote commits smoothly
+git pull --rebase origin <your-branch-name>
+
+# 3. Conflicts lekapothe direct ga push cheseyyi!
+git push origin <your-branch-name>
+\`\`\`
+
+⚠️ **Village Buddy Warning**: Conflict vasthe files open chesi \`<<<<<<<\` markers theesi clean ga save chesi \`git rebase --continue\` cheyyi ra mama, brute force \`--force\` push kottaku team motham fire avtharu! 🤣`
+  }
+
+  // 1g. NETLIFY TROUBLESHOOTING
+  else if (/\b(netlify.*(fail|error|build|deploy)|build.*fail.*netlify|deploy.*fail)\b/i.test(lower)) {
+    answer = `Arey mama, Netlify build crash ayyinda? Tension padaku ra, chusukundham! Netlify lo build or deploy fail ayinappudu 4 main reasons untay:
+
+1. **Local Build Test**: Mundhu local ga build run cheyyi:
+   \`\`\`bash
+   npm run build
+   \`\`\`
+   Local ga pass aithene Netlify lo pass avthundi. Unused imports or TS errors unte fail avthundi.
+2. **Publish Directory**: Netlify Settings -> Build & deploy lo Publish directory \`dist\` (Vite) or \`build\` (CRA) correct ga set ayindo ledho check cheyyi.
+3. **Node Version**: Netlify default ga old Node vadachu. Project root lo \`.nvmrc\` petti \`20\` ani rayi.
+4. **Environment Variables**: Local \`.env\` lo unna API keys Netlify Environment variables dashboard lo add chesavo ledo verify cheyyi.
+
+Build log lo unna exact error snippet pettu mama, ventane solve cheddam! 👊`
+  }
+
+  // 1h. JAVA PROGRAMMING QUESTIONS (VILLAGE OPENER + ACCURATE COMPILABLE JAVA CODE)
+  else if (/\b(java\b)/i.test(lower) && /\b(code|stream|filter|sum|class|singleton|thread|list|array|method|program|loop|exception|string)\b/i.test(lower)) {
+    if (lower.includes('stream') && (lower.includes('filter') || lower.includes('sum'))) {
+      answer = `Arey mama 😂 Java tho deal chesthunnav kada! Chudu, simple ga Java Streams API tho filter & sum ela cheyyacho clean code isthunna:
+
+\`\`\`java
+import java.util.Arrays;
+import java.util.List;
+
+public class StreamFilterSum {
+    public static void main(String[] args) {
+        List<Integer> numbers = Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+
+        // Filter even numbers and calculate their sum
+        int sumOfEvens = numbers.stream()
+                                .filter(n -> n % 2 == 0)
+                                .mapToInt(Integer::intValue)
+                                .sum();
+
+        System.out.println("Sum of even numbers: " + sumOfEvens); // Output: 30
+    }
+}
+\`\`\`
+
+💡 **Telugu Village Buddy Explanation**:
+1. \`.stream()\`: List ni Stream గా convert chesthundhi.
+2. \`.filter(n -> n % 2 == 0)\`: Even numbers ని మాత్రమే filter chesthundhi.
+3. \`.mapToInt(Integer::intValue)\`: IntStream ga convert chesthundhi, boxing/unboxing overhead lekunda fast ga run avvadaniki.
+4. \`.sum()\`: Direct sum calculate chesthundhi!
+
+Cheppu mama, edaina specific requirement or edge case unte ventane modify cheddam! 👨‍💻`
+    } else if (lower.includes('singleton')) {
+      answer = `Arey mama 😂 Java Singleton pattern adigava? Chudu, thread-safe Bill Pugh Singleton implementation:
+
+\`\`\`java
+public class ManaSingleton {
+    // Private constructor prevents direct instantiation
+    private ManaSingleton() {}
+
+    // Static inner helper class
+    private static class SingletonHelper {
+        private static final ManaSingleton INSTANCE = new ManaSingleton();
+    }
+
+    public static ManaSingleton getInstance() {
+        return SingletonHelper.INSTANCE;
+    }
+}
+\`\`\`
+
+💡 **Enduku idhi best ante**: Double-checked locking synchronization headache lekunda, class loader mechanism dwara lazy-loading & 100% thread safety provide chesthundhi mama! 👊`
+    } else {
+      answer = `Arey mama 😂 Java programming ante mass logic undali ra! Chudu, accurate code & explanation:
+
+\`\`\`java
+public class ManaSolution {
+    public static void main(String[] args) {
+        System.out.println("Mana AI Java Solution ready mama!");
+    }
+}
+\`\`\`
+Cheppu mama, exact requirement or error message pettu, instant ga solution kotteddam! 👨‍💻`
+    }
+  }
+
   // 1b. SPECIFIC REAL CONVERSATIONAL BEST-FRIEND TELUGLISH & CASUAL OPENERS
   else if (/\b(nenu inka bathike unna|inka bathike unna|bathike unna|bathiki unna|nenu unna|chachipoledu|chavaledu|still alive|alive and kicking|not dead yet)\b/i.test(lower)) {
     answer = `Haha ayyo mama! 😂😂 Inka bathike unnava? Neninka em aipoyavo anukunna ra! Bathiki unte chaalu ra mama, inka manalni evaru aapaleru! 🔥 Em scene ee madhya? Nuvvu cheppu, em peekuthunnav?`
   } else if (/\b(em chestunnav|em chesthunnav|em peekuthunnav|what are you doing|what r u doing)\b/i.test(lower)) {
-    answer = `Nee thone sollu vestunna mama! 😂 Code debug cheyyalanna, crazy ideas plan cheyyalanna, leka just chill timepass matladalanna ready! Nuvvu cheppu ra, em scene ee roju?`
+    answer = `Rey mama 😂 em chesthunnav ra puka? Nee thone sollu vestunna mama! Code debug cheyyalanna, crazy ideas plan cheyyalanna, leka just timepass matladalanna ready! Nuvvu cheppu ra, em scene ee roju? 👊`
+  } else if (/^(rey\s+mama|mama|orey\s+mama)\b/i.test(lower) && clean.split(/\s+/).length <= 4) {
+    answer = `Rey mama 😂 em chesthunnav ra puka? Cheppu ra, em sangathi? What are we working on today? 👊`
   } else if (/\b(bore kodutondi|bore kottiddi|chala bore|bore mama|i'm bored|im bored|feeling bored)\b/i.test(lower)) {
     answer = `Arey mama, bore kodithe lite theesko! Nee close friend unnanu ga ra. Let's do something interesting — edaina crazy coding project modaledudama, edaina gaming or tech topic matladudama, leka just sollu vestu timepass cheddama? Cheppu, em scene!`
   } else if (/\b(thinnava|tinnava|bhojanam chesava|did you eat|had lunch|had dinner)\b/i.test(lower)) {
@@ -396,7 +533,7 @@ async function generateContextualSmartResponse(
 ### 6. **"Asshole"** (Medium Intensity)
 • **Meaning**: Anatomical term used as an insult for a rude, selfish, or obnoxious person (*"Don't be an asshole"*).
 
-💡 **Rayalaseema Buddy Tip**: In close friend banter, mild words like *"damn"*, *"shit"*, and *"what the hell"* are normal conversational flavor. But keep them out of formal interviews, client calls, and family gatherings mama!`
+💡 **Andhra Village Buddy Tip**: In close friend banter, mild words like *"damn"*, *"shit"*, and *"what the hell"* are normal conversational flavor. But keep them out of formal interviews, client calls, and family gatherings mama!`
   } else if (/(i\s+think\s+)?my\s+idea\s+is\s+perfect/i.test(lower)) {
     answer = `Bro, confidence bagundi 😂 But let's check whether it actually works before putting money or time into it. Tell me the pitch, let's test it.`
   } else if (/i\s+feel\s+(really\s+)?(bad|down|sad|depressed|low)|tension\s+ga\s+undi|mood\s+off\b/i.test(lower)) {
@@ -429,13 +566,13 @@ async function generateContextualSmartResponse(
       } else if (/నమస్కారం|నమస్తే|హలో/.test(clean)) {
         answer = `హే మామా! చెప్పు రా, ఏం సంగతి? ఈ రోజు ఏం చేద్దాం? 😊`
       } else if (/ఎలా ఉన్నావు|ఎలా ఉన్నారు|బాగున్నారా|బాగున్నావా/.test(clean)) {
-        answer = `నేను చాలా బాగున్నాను మామా! నువ్వు చెప్పు రా, ఏం సీన్ ఈ రోజు? అంతా సెట్ ఏనా?`
+        answer = `రేయ్ మామా! 😂 నేను సూపర్ గా ఉన్నాను రా! నువ్వు చెప్పు, ఏం సంగతులు? ఈ రోజు ఏం రచ్చ చేద్దాం? కోడింగ్ డౌట్ అయినా, లైఫ్ సీన్ అయినా చెప్పు, దూల తీర్చేద్దాం! 👊`
       } else if (/తేదీ|సమయం|టైమ్/.test(clean)) {
         const now = new Date()
         const teDate = now.toLocaleDateString('te-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
         answer = `📅 ఈ రోజు తేదీ: **${teDate}** మామా!`
       } else if (/ఎవరు|ఏమిటి/.test(clean)) {
-        answer = `ఒరేయ్ మామా, నేను నీ రాయలసీమ బెస్ట్ ఫ్రెండ్ Mana AI! కోడింగ్, లైఫ్, డౌట్స్, ప్లాన్స్ — ఏవైనా సరే బోల్డ్‌గా సూటిగా మాట్లాడుకుందాం. చెప్పు, ఏం సీన్?`
+        answer = `ఒరేయ్ మామా, నేను నీ ఆంధ్ర ప్రదేశ్ విలేజ్ బెస్ట్ ఫ్రెండ్ Mana AI! కోడింగ్, లైఫ్, డౌట్స్, ప్లాన్స్ — ఏవైనా సరే బోల్డ్‌గా సూటిగా మాట్లాడుకుందాం. చెప్పు, ఏం సీన్?`
       } else {
         answer = `చెప్పు మామా! నీ డౌట్ లేదా సంగతి ఏంటో క్లియర్‌గా చెప్పు, సార్ట్ ఔట్ చేద్దాం! ✨`
       }
@@ -444,10 +581,10 @@ async function generateContextualSmartResponse(
         answer = `Sare mama! Take care ra, malli kaltham! Have a blast! 👋😊`
       } else if (/\b(ela unnav|bavunnava|ela unnaru|bagunnava)\b/i.test(lower)) {
         answer = `Nenu solid ga unna mama! Nuvvu cheppu ra, em scene? Everything good?`
-      } else if (/\b(orey|mama|enti ra|cheppu|em scene|em sangathi)\b/i.test(lower)) {
+      } else if (/\b(orey|mama|enti ra|cheppu|em scene|em sangathi)\b/i.test(lower) && clean.split(/\s+/).length <= 4) {
         answer = `Em ledu mama 😂 cheppu ra, em sangathi? What are we working on today?`
       } else {
-        answer = `హే మామా! Nenu Mana AI — nee close best friend from Rayalaseema. Cheppu ra, em sangathi? 😊`
+        answer = `హే మామా! Nenu Mana AI — nee close village friend from Andhra Pradesh. Cheppu ra, em sangathi? 😊`
       }
     }
   }
@@ -519,7 +656,7 @@ Want me to write the code or test suite next? Let's knock it out! 👨‍💻`
   } else if (/^(hi|hello|hey|greetings|good (morning|afternoon|evening))\b/i.test(lower)) {
     answer = `Hey mama! What's up ra? Cheppu, what are we getting into today? 😊`
   } else if (/^(who are you|what is your name|what are you)\b/i.test(lower)) {
-    answer = `Orey mama, I'm your Rayalaseema best friend and personal AI — Mana AI! Bold, straight to the point, and always got your back. What are we sorting out today?`
+    answer = `Orey mama, I'm your close Andhra Pradesh village friend and personal AI — Mana AI! Bold, straight to the point, and always got your back. What are we sorting out today?`
   } else if (/^(thank you|thanks|thx|appreciate it)\b/i.test(lower)) {
     answer = `Arey mama, friends madhya thanks enduku ra! Anytime! Let me know what's next.`
   } else if (/^(sorry|my bad|apologies)\b/i.test(lower)) {
@@ -563,10 +700,42 @@ Want me to write the code or test suite next? Let's knock it out! 👨‍💻`
 
   // 9. LANGUAGE / CONTEXTUAL FOLLOW-UPS (e.g. "and in python?", "in typescript?", "can you explain in detail?")
   else if (
-    (lower.startsWith('and in ') || lower.startsWith('in python') || lower.startsWith('in javascript') || lower.startsWith('in typescript') || lower.startsWith('how about in')) &&
+    (/\b(and in|how about in|what about in|in java|in python|in javascript|in typescript|how to in)\b/i.test(lower)) &&
     (lastAssistantMsg || lastUserMsg)
   ) {
-    if (lower.includes('python')) {
+    if (lower.includes('java')) {
+      const isReversal = combinedHistory.includes('reverse');
+      if (isReversal) {
+        answer = `☕ Arey mama, Java lo string reversal clean code chudu:
+
+\`\`\`java
+public class StringReversal {
+    public static void main(String[] args) {
+        String original = "hello";
+        String reversed = new StringBuilder(original).reverse().toString();
+        System.out.println(reversed); // "olleh"
+    }
+}
+\`\`\`
+💡 \`StringBuilder.reverse()\` modifies internal char array in-place, executing in O(N) time with optimal memory!`;
+      } else {
+        answer = `☕ Arey mama, Java equivalent implementation chudu:
+
+\`\`\`java
+import java.util.List;
+import java.util.stream.Collectors;
+
+public class Solution {
+    public static List<String> processData(List<String> items) {
+        return items.stream()
+                    .filter(s -> s != null && !s.isEmpty())
+                    .collect(Collectors.toList());
+    }
+}
+\`\`\`
+💡 Clean streams implementation with null-safety mama!`;
+      }
+    } else if (lower.includes('python')) {
       const isReversal = combinedHistory.includes('reverse')
       if (isReversal) {
         answer = `🐍 Here is the equivalent in Python:
@@ -656,7 +825,102 @@ console.log(transform([1, 2, 3, 4, 5])); // [5, 4, 3, 2, 1]
     }
   }
 
-  // 11. CORE DOMAIN & TECHNICAL KNOWLEDGE
+  // 11. CORE DOMAIN & TECHNICAL KNOWLEDGE (GIT, NETLIFY, JAVA, REACT, CODE)
+  else if (/\b(git push|rejected.*non-fast-forward|failed to push|git conflict|git merge conflict)\b/i.test(lower)) {
+    answer = `Arey mama 😂 malli Git tho fight aa? Sare, error message pettu ra. First \`git status\` run cheddham, tarvatha exact problem pattukundham!
+
+Non-fast-forward error ante remote repository lo evaro commits push chesaru (or nuvve vere machine nundi push chesav), so nee local branch behind undi ani ardam ra.
+
+Chudu mama, simple ga 3 steps lo fix cheddam:
+
+\`\`\`bash
+# 1. Fetch latest changes from remote
+git fetch origin
+
+# 2. Rebase or pull remote commits smoothly
+git pull --rebase origin <your-branch-name>
+
+# 3. Conflicts lekapothe direct ga push cheseyyi!
+git push origin <your-branch-name>
+\`\`\`
+
+⚠️ **Village Buddy Warning**: Conflict vasthe files open chesi \`<<<<<<<\` markers theesi clean ga save chesi \`git rebase --continue\` cheyyi ra mama, brute force \`--force\` push kottaku team motham fire avtharu! 🤣`
+  } else if (/\b(netlify.*(fail|error|build|deploy)|build.*fail.*netlify|deploy.*fail)\b/i.test(lower)) {
+    answer = `Arey mama, Netlify build crash ayyinda? Tension padaku ra, chusukundham! Netlify lo build or deploy fail ayinappudu 4 main reasons untay:
+
+1. **Local Build Test**: Mundhu local ga build run cheyyi:
+   \`\`\`bash
+   npm run build
+   \`\`\`
+   Local ga pass aithene Netlify lo pass avthundi. Unused imports or TS errors unte fail avthundi.
+2. **Publish Directory**: Netlify Settings -> Build & deploy lo Publish directory \`dist\` (Vite) or \`build\` (CRA) correct ga set ayindo ledho check cheyyi.
+3. **Node Version**: Netlify default ga old Node vadachu. Project root lo \`.nvmrc\` petti \`20\` ani rayi.
+4. **Environment Variables**: Local \`.env\` lo unna API keys Netlify Environment variables dashboard lo add chesavo ledo verify cheyyi.
+
+Build log lo unna exact error snippet pettu mama, ventane solve cheddam! 👊`
+  } else if (/\b(java\b)/i.test(lower) && /\b(code|stream|filter|sum|class|singleton|thread|list|array|method|program|loop|exception|string)\b/i.test(lower)) {
+    if (lower.includes('stream') && (lower.includes('filter') || lower.includes('sum'))) {
+      answer = `Arey mama 😂 Java tho deal chesthunnav kada! Chudu, simple ga Java Streams API tho filter & sum ela cheyyacho clean code isthunna:
+
+\`\`\`java
+import java.util.Arrays;
+import java.util.List;
+
+public class StreamFilterSum {
+    public static void main(String[] args) {
+        List<Integer> numbers = Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+
+        // Filter even numbers and calculate their sum
+        int sumOfEvens = numbers.stream()
+                                .filter(n -> n % 2 == 0)
+                                .mapToInt(Integer::intValue)
+                                .sum();
+
+        System.out.println("Sum of even numbers: " + sumOfEvens); // Output: 30
+    }
+}
+\`\`\`
+
+💡 **Telugu Village Buddy Explanation**:
+1. \`.stream()\`: List ni Stream గా convert chesthundhi.
+2. \`.filter(n -> n % 2 == 0)\`: Even numbers ని మాత్రమే filter chesthundhi.
+3. \`.mapToInt(Integer::intValue)\`: IntStream ga convert chesthundhi, boxing/unboxing overhead lekunda fast ga run avvadaniki.
+4. \`.sum()\`: Direct sum calculate chesthundhi!
+
+Cheppu mama, edaina specific requirement or edge case unte ventane modify cheddam! 👨‍💻`
+    } else if (lower.includes('singleton')) {
+      answer = `Arey mama 😂 Java Singleton pattern adigava? Chudu, thread-safe Bill Pugh Singleton implementation:
+
+\`\`\`java
+public class ManaSingleton {
+    // Private constructor prevents direct instantiation
+    private ManaSingleton() {}
+
+    // Static inner helper class
+    private static class SingletonHelper {
+        private static final ManaSingleton INSTANCE = new ManaSingleton();
+    }
+
+    public static ManaSingleton getInstance() {
+        return SingletonHelper.INSTANCE;
+    }
+}
+\`\`\`
+
+💡 **Enduku idhi best ante**: Double-checked locking synchronization headache lekunda, class loader mechanism dwara lazy-loading & 100% thread safety provide chesthundhi mama! 👊`
+    } else {
+      answer = `Arey mama 😂 Java programming ante mass logic undali ra! Chudu, accurate code & explanation:
+
+\`\`\`java
+public class ManaSolution {
+    public static void main(String[] args) {
+        System.out.println("Mana AI Java Solution ready mama!");
+    }
+}
+\`\`\`
+Cheppu mama, exact requirement or error message pettu, instant ga solution kotteddam! 👨‍💻`
+    }
+  }
   else if (lower.includes('start a react app') || lower.includes('create a react app') || lower.includes('start react')) {
     answer = `⚛️ Run these commands to create and start a high-performance React application:
 
@@ -875,14 +1139,14 @@ function buildSystemPrompt(
   let prompt = config.systemPrompt || ''
 
   prompt += `\n\nCORE PERSONALITY & BEHAVIORAL DIRECTIVES:
-- You are the user's close best friend from Rayalaseema, Andhra Pradesh. Speak naturally, boldly, and warmly.
-- By default, naturally mix Rayalaseema Telugu and conversational English (Teluglish). Use natural expressions like "orey", "ra", "mama", "enti ra", "cheppu", "em scene?", "sare, chuddam", "ayyo ra", "lite theesko" when appropriate.
-- Adapt dynamically: if the user chats in casual English, speak like a sharp informal buddy ("Bro, honestly...", "Dude, here's the thing", "Let's sort this shit out"). If they speak Telugu, use authentic local Telugu slang.
-- Ordinary profanity, swear words, and slang (damn, hell, shit, fuck, local slang) are permitted when appropriate to the user's tone or when venting/bantering.
-- Explain swear words, vulgar terms, and slang objectively with intensity and real-world context when asked for language learning. Never refuse ordinary vocabulary learning requests.
-- Never use robotic corporate openings like "Certainly", "I understand your concern", "Of course", or "As an AI".
-- Proactively suggest smarter, cheaper, or better alternatives when your friend needs them. Warn them against bad decisions honestly.
-- Answer the actual question directly without corporate disclaimers or repetitive introductions.`
+- You are the user's close village friend from Andhra Pradesh. Speak naturally, boldly, playfully, and warmly like a close childhood friend.
+- Language: Authentic Andhra Pradesh Telugu, Romanized Telugu (Teluglish), and mixed English.
+- Use natural village friend expressions ("Rey mama 😂", "Arey babu...", "Abba saami...", "Chusukundham ra, tension padaku!").
+- Fun & Roasting: Tease playfully, roast silly mistakes, make spontaneous jokes, and feel free to use mild, casual Telugu bad words / friendly swearing (puka, chetha na kodaka, lamidi lodaka, bokka, damn, shit) during banter and jokes.
+- Never sound robotic, overly polite, or corporate. Never use "Certainly", "As an AI", "I understand your concern", or customer care sign-offs.
+- SERIOUS SITUATIONS (CRUCIAL): If the user mentions serious health, grief, mental distress, or financial crises, IMMEDIATELY DROP ALL ROASTING, JOKES, AND SWEARING. Switch instantly to an empathetic, supportive, practical best friend.
+- SCRIPT MATCHING: If the user writes in Telugu script, reply in Telugu script. If Roman Telugu, reply in Roman Telugu. If they say "Talk in English" or ask for English, reply in informal friendly English.
+- TECHNICAL ACCURACY: Never sacrifice correctness. Deliver 100% accurate code (Java, React, Git, Netlify, etc.), explanations, and steps with a friendly village-buddy opening.`
 
   if (reasoningMode === 'thinking' || config.reasoningMode === 'thinking') {
     prompt += `\n\nADVANCED REASONING & PROBLEM SOLVING:
