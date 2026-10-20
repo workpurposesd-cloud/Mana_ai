@@ -26,7 +26,7 @@ export function estimateTokens(text: string): number {
 export function optimizeConversationContext(
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
   memories: MemoryItem[] = [],
-  maxTokenBudget: number = 2500
+  maxTokenBudget: number = 3500
 ): OptimizedContext {
   if (!Array.isArray(history) || history.length === 0) {
     return {
@@ -55,8 +55,8 @@ export function optimizeConversationContext(
     })
   }
 
-  // 2. Sliding Window: Separate into recent window (last 8 messages) and older history
-  const RECENT_WINDOW_SIZE = 8
+  // 2. Sliding Window: Separate into recent window (last 12 messages) and older history
+  const RECENT_WINDOW_SIZE = 12
   const olderMessages = cleanHistory.slice(0, Math.max(0, cleanHistory.length - RECENT_WINDOW_SIZE))
   const recentMessages = cleanHistory.slice(-RECENT_WINDOW_SIZE)
 
@@ -65,23 +65,20 @@ export function optimizeConversationContext(
   if (olderMessages.length > 0) {
     const topics: string[] = []
     for (const m of olderMessages) {
-      if (m.role === 'user' && m.content.length > 5) {
-        // Extract first 40 chars of user intent
-        const snippet = m.content.slice(0, 40).replace(/\n/g, ' ')
+      if (m.role === 'user' && m.content.length > 3) {
+        const snippet = m.content.slice(0, 60).replace(/\n/g, ' ')
         topics.push(snippet)
       }
     }
     if (topics.length > 0) {
-      historySummary = `[Earlier conversation context: User previously discussed: ${topics.slice(-4).join('; ')}]`
+      historySummary = `[Earlier conversation context: User previously discussed: ${topics.slice(-6).join('; ')}]`
     }
   }
 
-  // 4. Cap individual older messages within the recent window (max 600 chars each)
-  // Current prompt is not in history; recent history is trimmed to prevent blow-ups
+  // 4. Cap individual older messages within the recent window (up to 2000 chars)
   const sanitizedHistory = recentMessages.map((msg, index) => {
-    // Keep the very last assistant message slightly longer (up to 1200 chars)
     const isVeryRecent = index >= recentMessages.length - 2
-    const maxLength = isVeryRecent ? 1200 : 600
+    const maxLength = isVeryRecent ? 2500 : 1500
     if (msg.content.length > maxLength) {
       return {
         role: msg.role,

@@ -788,10 +788,10 @@ export const App: React.FC = () => {
     setMessages(nextMessages)
     setIsGenerating(true)
 
-    // Sliding context window: send last 8 turns capped at 500 characters
-    const history = messages.slice(-8).map((m) => ({
+    // Context window: send last 16 turns preserving full locality names and context
+    const history = messages.slice(-16).map((m) => ({
       role: m.role,
-      content: m.content.length > 500 ? m.content.slice(0, 500) + '...' : m.content,
+      content: m.content.length > 2500 ? m.content.slice(0, 2500) + '...' : m.content,
     }))
 
     const controller = new AbortController()

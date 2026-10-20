@@ -106,13 +106,33 @@ export interface SearchEvidence {
   errorMessage?: string
 }
 
-export interface IntentInfo {
+export type IntentCategory =
+  | 'conversational'
+  | 'correction_feedback'
+  | 'contextual_followup'
+  | 'topic_change'
+  | 'general_knowledge'
+  | 'coding'
+  | 'news'
+  | 'sports'
+  | 'weather'
+  | 'pricing'
+  | 'explicit_search'
+
+export interface IntentClassification {
   needsSearch: boolean
   refinedQuery: string
   reason: string
-  category: 'code' | 'news' | 'technical' | 'conversational' | 'factual' | 'general_knowledge' | 'weather' | 'finance'
+  category: IntentCategory
   isDetailRequested: boolean
+  isCorrectionOrFeedback?: boolean
+  isFollowUp?: boolean
+  contextualTopic?: string
+  correctedEntity?: string
+  originalQuery?: string
 }
+
+export type IntentInfo = IntentClassification
 
 export interface ChatMessage {
   id?: string

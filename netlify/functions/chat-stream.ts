@@ -59,12 +59,14 @@ export const handler = stream(async (event, _context) => {
   const relevantMemories = memoryService.getRelevantMemories(prompt, isMemoryEnabled)
   const documentMatches = documentService.searchKnowledge(prompt, 3)
 
-  // Step 2: Intent classification
-  const conversationContext = (history || []).slice(-4).map((h: any) => `${h.role}: ${h.content}`)
-  const intent = classifyIntent(prompt, conversationContext)
+  // Step 2: Intent classification with full conversation history
+  const intent = classifyIntent(prompt, history)
   const shouldSearch =
-    (searchMode === 'always' && intent.category !== 'conversational') ||
-    (searchMode === 'auto' && intent.needsSearch)
+    searchMode !== 'never' &&
+    !intent.isCorrectionOrFeedback &&
+    intent.category !== 'conversational' &&
+    ((searchMode === 'always' && intent.category !== 'contextual_followup') ||
+     (searchMode === 'auto' && intent.needsSearch))
 
   const passThrough = new PassThrough()
 

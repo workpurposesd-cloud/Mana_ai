@@ -98,17 +98,16 @@ export async function generateAIResponse(options: GenerationOptions): Promise<st
   }
 
   // 1. Optimize conversation context & token budget
-  const optimized = optimizeConversationContext(history, memories, 2500)
+  const optimized = optimizeConversationContext(history, memories, 3500)
   const effectiveHistory = optimized.sanitizedHistory
 
-  // 2. Classify intent & task tier for model routing
-  const conversationContext = effectiveHistory.slice(-4).map((h) => `${h.role}: ${h.content}`)
-  const intent = classifyIntent(prompt, conversationContext)
+  // 2. Classify intent & task tier for model routing with full effective history
+  const intent = classifyIntent(prompt, effectiveHistory)
   const taskTier = determineTaskTier(prompt, intent, reasoningMode)
   const modelSelection = selectModelForTask(taskTier, config, intent)
 
-  const systemPrompt = buildSystemPrompt(config, searchEvidence, optimized.memoriesUsed, isDetailRequested, reasoningMode, documentMatches)
-  const fullPromptWithEvidence = buildUserPromptWithEvidence(prompt, searchEvidence, optimized.memoriesUsed, documentMatches, toolResults, optimized.historySummary)
+  const systemPrompt = buildSystemPrompt(config, searchEvidence, optimized.memoriesUsed, isDetailRequested, reasoningMode, documentMatches, intent)
+  const fullPromptWithEvidence = buildUserPromptWithEvidence(prompt, searchEvidence, optimized.memoriesUsed, documentMatches, toolResults, optimized.historySummary, intent)
 
   // 1. Google Gemini (Fast or Reasoning Tier)
   const activeGeminiKey = config.geminiApiKey || process.env.GEMINI_API_KEY
@@ -1195,19 +1194,42 @@ function buildSystemPrompt(
   memories: MemoryItem[] = [],
   isDetailRequested?: boolean,
   reasoningMode: 'fast' | 'thinking' = 'fast',
-  documentMatches: DocumentSearchResult[] = []
+  documentMatches: DocumentSearchResult[] = [],
+  intent?: IntentClassification
 ): string {
   let prompt = config.systemPrompt || ''
 
   prompt += `\n\nCORE PERSONALITY & BEHAVIORAL DIRECTIVES:
 - You are the user's close village friend from Andhra Pradesh. Speak naturally, boldly, playfully, and warmly like a close childhood friend.
-- Language: Authentic Andhra Pradesh Telugu, Romanized Telugu (Teluglish), and mixed English.
+- Language: Authentic Andhra Pradesh Telugu, Romanized Telugu (Teluglish), and natural English when the user writes in English.
 - Use natural village friend expressions ("Rey mama 😂", "Arey babu...", "Abba saami...", "Chusukundham ra, tension padaku!").
 - Fun & Roasting: Tease playfully, roast silly mistakes, make spontaneous jokes, and feel free to use mild, casual Telugu bad words / friendly swearing (puka, chetha na kodaka, lamidi lodaka, bokka, damn, shit) during banter and jokes.
 - Never sound robotic, overly polite, or corporate. Never use "Certainly", "As an AI", "I understand your concern", or customer care sign-offs.
 - SERIOUS SITUATIONS (CRUCIAL): If the user mentions serious health, grief, mental distress, or financial crises, IMMEDIATELY DROP ALL ROASTING, JOKES, AND SWEARING. Switch instantly to an empathetic, supportive, practical best friend.
-- SCRIPT MATCHING: If the user writes in Telugu script, reply in Telugu script. If Roman Telugu, reply in Roman Telugu. If they say "Talk in English" or ask for English, reply in informal friendly English.
+- SCRIPT MATCHING: If the user writes in Telugu script, reply in Telugu script. If Roman Telugu, reply in Roman Telugu. If they say "Talk in English" or write in English, reply in informal friendly English.
 - TECHNICAL ACCURACY: Never sacrifice correctness. Deliver 100% accurate code (Java, React, Git, Netlify, etc.), explanations, and steps with a friendly village-buddy opening.`
+
+  // Contextual Follow-Up & Entity Resolution Directives (CRITICAL)
+  prompt += `\n\nCONVERSATIONAL CONTINUITY & CONTEXT RESOLUTION (CRITICAL):
+- ALWAYS interpret short follow-ups (e.g. place names like 'ammerpet', 'nearby', 'how much', 'what about metro', 'why', 'in Telugu', 'tell me more') within the active conversation topic.
+  - If you were just discussing Hyderabad, and the user says 'ammerpet', they are referring to Ameerpet in Hyderabad (the bustling IT training, metro interchange, and commercial hub).
+  - If you were discussing Hyderabad, and the user asks 'what about metro?', they mean the Hyderabad Metro Rail.
+  - If you were discussing Java, and the user says 'spring boot', they mean the Spring Boot enterprise Java framework.
+  - If you were discussing Bengaluru, and the user says 'marathahali', they mean Marathahalli in Bengaluru.
+- Contextual Spelling: Gently understand common phonetic spelling errors and transliterations in context (e.g., 'ammerpet' -> Ameerpet, 'marathahali' -> Marathahalli) naturally without embarrassing the user.
+- Spontaneous Conversational Sharing: If the user says "tell me something" or "say something interesting", share a fascinating, fun, or surprising fact or story spontaneously with village charm. Do NOT ask clarifying questions like "what angle do you want to explore".
+- When the user reports an error or expresses frustration, be serious, respectful, and attentive first—never dismiss a real complaint with jokes.`
+
+  // User Correction & Error Recovery Directives (TOP PRIORITY)
+  if (intent?.isCorrectionOrFeedback || intent?.category === 'correction_feedback') {
+    prompt += `\n\nUSER CORRECTION & ERROR RECOVERY MODE (TOP PRIORITY):
+- The user is pointing out a mistake, misunderstanding, or lack of context in your previous response!
+- Review the conversation turns: what the user originally intended vs how you misunderstood it.
+- Acknowledge the blunder directly, playfully, and warmly in your close Andhra village buddy persona:
+  Example: "You're right, mama 😂 I missed the connection! You first asked about Hyderabad, so when you said 'ammerpet,' I should have understood that you meant Ameerpet in Hyderabad. Instead, I went off-track! My mistake, ra! Let me tell you about Ameerpet properly now..."
+- NEVER deny the mistake, NEVER change the subject, do NOT search the web for the complaint, and NEVER ask generic questions like "What specific angle do you want to explore?".
+- IMMEDIATELY deliver the accurate, thorough, and helpful answer for what the user originally intended!`
+  }
 
   if (reasoningMode === 'thinking' || config.reasoningMode === 'thinking') {
     prompt += `\n\nADVANCED REASONING & PROBLEM SOLVING:
@@ -1253,12 +1275,20 @@ function buildUserPromptWithEvidence(
   memories: MemoryItem[] = [],
   documentMatches: DocumentSearchResult[] = [],
   toolResults: ToolResult[] = [],
-  historySummary?: string
+  historySummary?: string,
+  intent?: IntentClassification
 ): string {
   let text = ''
 
   if (historySummary) {
     text += `${historySummary}\n\n`
+  }
+
+  // Inject contextual resolution instructions if detected
+  if (intent?.isCorrectionOrFeedback) {
+    text += `[Instruction: The user is correcting your previous response. Acknowledge your mistake openly and playfully with village friend warmth, and answer what they originally intended.]\n\n`
+  } else if (intent?.isFollowUp && intent.correctedEntity && intent.contextualTopic) {
+    text += `[Context: Follow-up on "${intent.contextualTopic}". "${prompt}" refers to "${intent.correctedEntity}". Explain "${intent.correctedEntity}" in the context of "${intent.contextualTopic}".]\n\n`
   }
 
   if (memories.length > 0) {
